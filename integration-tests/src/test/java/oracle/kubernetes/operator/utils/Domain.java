@@ -790,13 +790,20 @@ public class Domain {
       ExecResult result = ExecCommand.exec(curlCmd.toString());
       if (result.exitValue() != 0) {
         throw new RuntimeException(
-            "FAILURE: command " + curlCmd + " failed, returned " + result.stderr());
+            "FAILURE: command "
+                + curlCmd
+                + " failed, returned exitValue: "
+                + result.exitValue()
+                + ", stdout: "
+                + result.stdout()
+                + ", stderr: "
+                + result.stderr());
       } else {
         logger.info("webapp invoked successfully");
       }
       if (verifyLoadBalancing) {
         String response = result.stdout().trim();
-        // logger.info("response "+ response);
+        logger.info("response " + response);
         for (String key : managedServers.keySet()) {
           if (response.contains(key)) {
             managedServers.put(key, new Boolean(true));
