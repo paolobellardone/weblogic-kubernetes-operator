@@ -16,3 +16,4 @@ exposeAdminNodePort: true
 adminNodePort: 30704
 namespace: test2
 createDomainFilesDir: wdt
+javaOptions: -Dweblogic.StdoutDebugEnabled=true -Dweblogic.debug.DebugHttp=true -Dweblogic.log.LogSeverity=Debug -Dweblogic.log.LoggerSeverity=Debug
