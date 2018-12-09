@@ -751,7 +751,14 @@ public class Domain {
       ExecResult result = ExecCommand.exec(curlCmd.toString());
       if (result.exitValue() != 0) {
         throw new RuntimeException(
-            "FAILURE: command " + curlCmd + " failed, returned " + result.stderr());
+            "FAILURE: command "
+                + curlCmd
+                + " failed, returned exitValue: "
+                + result.exitValue()
+                + ", stdout: "
+                + result.stdout()
+                + ", stderr: "
+                + result.stderr());
       }
       String responseCode = result.stdout().trim();
       if (!responseCode.equals("200")) {
