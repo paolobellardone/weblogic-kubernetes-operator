@@ -258,7 +258,7 @@ export VM_TYPE="HotSpot"
 #  Copied from ${DOMAIN_HOME}/bin/startNodeManager.sh 
 export NODEMGR_HOME="${NODEMGR_HOME?}"
 export DOMAIN_HOME="${DOMAIN_HOME?}"
-export JAVA_OPTIONS="${JAVA_OPTIONS} -Dweblogic.RootDirectory=${DOMAIN_HOME}"
+export JAVA_OPTIONS="${JAVA_OPTIONS} -Dweblogic.RootDirectory=${DOMAIN_HOME} -Dweblogic.debug.DebugHttp=true -Dweblogic.log.StdoutSeverity=Debug -Dweblogic.StdoutDebugEnabled=true -Dweblogic.log.LogSeverity=Debug -Dweblogic.log.LoggerSeverity=Debug"
 
 ###############################################################################
 #
