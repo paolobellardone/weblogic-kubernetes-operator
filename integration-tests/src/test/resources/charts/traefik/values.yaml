@@ -8,3 +8,5 @@ dashboard:
   domain: traefik.example.com
 rbac:
   enabled: true
+debug:
+  enabled: true
