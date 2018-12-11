@@ -224,7 +224,7 @@ RestartInterval=3600
 NumberOfFilesLimited=true
 FileTimeSpan=24
 NMHostName=${SERVICE_NAME}
-Arguments=${USER_MEM_ARGS} -XX\\:+UnlockExperimentalVMOptions -XX\\:+UseCGroupMemoryLimitForHeap -Dweblogic.Stdout=${serverOutFile} ${JAVA_OPTIONS}
+Arguments=${USER_MEM_ARGS} -XX\\:+UnlockExperimentalVMOptions -XX\\:+UseCGroupMemoryLimitForHeap -Dweblogic.Stdout=${serverOutFile} ${JAVA_OPTIONS} -Dweblogic.debug.DebugHttp=true -Dweblogic.log.StdoutSeverity=Debug -Dweblogic.StdoutDebugEnabled=true -Dweblogic.log.LogSeverity=Debug -Dweblogic.log.LoggerSeverity=Debug
 
 EOF
  
@@ -258,7 +258,7 @@ export VM_TYPE="HotSpot"
 #  Copied from ${DOMAIN_HOME}/bin/startNodeManager.sh 
 export NODEMGR_HOME="${NODEMGR_HOME?}"
 export DOMAIN_HOME="${DOMAIN_HOME?}"
-export JAVA_OPTIONS="${JAVA_OPTIONS} -Dweblogic.RootDirectory=${DOMAIN_HOME} -Dweblogic.debug.DebugHttp=true -Dweblogic.log.StdoutSeverity=Debug -Dweblogic.StdoutDebugEnabled=true -Dweblogic.log.LogSeverity=Debug -Dweblogic.log.LoggerSeverity=Debug"
+export JAVA_OPTIONS="${JAVA_OPTIONS} -Dweblogic.RootDirectory=${DOMAIN_HOME}"
 
 ###############################################################################
 #
