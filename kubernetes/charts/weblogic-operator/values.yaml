@@ -22,6 +22,9 @@ domainNamespaces:
 # image specifies the docker image containing the operator code.
 image: "weblogic-kubernetes-operator:2.0"
 
+# imageWebUI specifies the docker image containing the operator web UI code.
+imageWebUI: "weblogic-kubernetes-operator-web-ui:2.0"
+
 # imagePullPolicy specifies the image pull policy for the operator docker image.
 imagePullPolicy: "IfNotPresent"
 

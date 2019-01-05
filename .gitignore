@@ -43,3 +43,6 @@ release.properties
 dependency-reduced-pom.xml
 *.ipr
 *.iws
+**/node_modules
+**/.factorypath
+operator-web-ui/src/shared/Rest.js

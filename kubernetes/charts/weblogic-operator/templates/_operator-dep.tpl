@@ -65,6 +65,29 @@ spec:
           initialDelaySeconds: 120
           periodSeconds: 5
       {{- if .elkIntegrationEnabled }}
+      - name: "weblogic-operator-web-ui"
+        image: {{ .imageWebUI | quote }}
+        imagePullPolicy: {{ .imagePullPolicy | quote }}
+        command: ["bash"]
+        args: ["/operator/operator-web-ui.sh"]
+        env:
+        - name: "OPERATOR_NAMESPACE"
+          valueFrom:
+            fieldRef:
+              fieldPath: "metadata.namespace"
+        volumeMounts:
+        - name: "weblogic-operator-cm-volume"
+          mountPath: "/operator/config"
+        - name: "weblogic-operator-secrets-volume"
+          mountPath: "/operator/secrets"
+          readOnly: true
+        livenessProbe:
+          exec:
+            command:
+              - "bash"
+              - "/operator/livenessProbe.sh"
+          initialDelaySeconds: 120
+          periodSeconds: 5
       - name: "logstash"
         image: {{ .logStashImage | quote }}
         args: [ "-f", "/logs/logstash.conf" ]
