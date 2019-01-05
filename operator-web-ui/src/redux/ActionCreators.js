@@ -1,11 +1,13 @@
 import * as ActionTypes from './ActionTypes'
 import { REST_ADDRESS, REST_AUTH_HEADER, REST_CERT } from '../shared/Rest'
-import { Agent } from 'https'
+import https from 'https'
 
 // operators
 
-const myAgent = new Agent({
-    ca: [REST_CERT]
+const myAgent = new https.Agent({
+    cert: REST_CERT,
+    ca: [REST_CERT],
+    rejectUnauthorized: false
 })
 
 export const fetchOperators = () => (dispatch) => {
@@ -13,12 +15,14 @@ export const fetchOperators = () => (dispatch) => {
 
     return fetch(REST_ADDRESS + 'operator', {
         method: 'GET',
-        headers: new Headers({
-            "Accept": "application/json",
-            "Authorization": REST_AUTH_HEADER
-        }),
+        mode: 'no-cors',
+        headers: {
+            'Authorization': REST_AUTH_HEADER,
+            'Accept': 'application/json'
+        },
+        cert: REST_CERT,
         agent: myAgent,
-        credentials: "same-origin"
+        credentials: 'include'
     })
         .then(response => {
             if (response.ok) {
