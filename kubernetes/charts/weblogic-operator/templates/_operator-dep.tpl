@@ -64,13 +64,20 @@ spec:
               - "/operator/livenessProbe.sh"
           initialDelaySeconds: 120
           periodSeconds: 5
-        {{- if .elkIntegrationEnabled }}
+      {{- if .elkIntegrationEnabled }}
+      - name: "logstash"
+        image: {{ .logStashImage | quote }}
+        args: [ "-f", "/logs/logstash.conf" ]
+        volumeMounts:
+        - name: "log-dir"
+          mountPath: "/logs"
         env:
         - name: "ELASTICSEARCH_HOST"
           value: {{ .elasticSearchHost | quote }}
         - name: "ELASTICSEARCH_PORT"
           value: {{ .elasticSearchPort | quote }}
-        {{- end }}
+      {{- end }}
+      {{- if .webUIEnabled }}
       - name: "weblogic-operator-web-ui"
         image: {{ .imageWebUI | quote }}
         imagePullPolicy: {{ .imagePullPolicy | quote }}
@@ -100,6 +107,7 @@ spec:
         volumeMounts:
         - name: "log-dir"
           mountPath: "/logs"
+      {{- end }}
       {{- if .imagePullSecrets }}
       imagePullSecrets:
       {{ .imagePullSecrets | toYaml }}
