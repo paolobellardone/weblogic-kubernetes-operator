@@ -64,7 +64,7 @@ spec:
               - "/operator/livenessProbe.sh"
           initialDelaySeconds: 120
           periodSeconds: 5
-        {- if .elkIntegrationEnabled }}
+        {{- if .elkIntegrationEnabled }}
         env:
         - name: "ELASTICSEARCH_HOST"
           value: {{ .elasticSearchHost | quote }}
