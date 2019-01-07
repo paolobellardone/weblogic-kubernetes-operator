@@ -101,12 +101,6 @@ spec:
               - "/operator/livenessProbe.sh"
           initialDelaySeconds: 120
           periodSeconds: 5
-      - name: "logstash"
-        image: {{ .logStashImage | quote }}
-        args: [ "-f", "/logs/logstash.conf" ]
-        volumeMounts:
-        - name: "log-dir"
-          mountPath: "/logs"
       {{- end }}
       {{- if .imagePullSecrets }}
       imagePullSecrets:
