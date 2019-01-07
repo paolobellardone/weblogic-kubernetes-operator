@@ -67,6 +67,15 @@ externalRestHttpsPort: 31001
 # Otherwise, it is ignored.
 #externalOperatorKey:
 
+# webUIEnabled specifies whether the operator's web interface is exposed outside of the Kubernetes
+# cluster on the port specified by the 'externalWebPort' property.
+webUIEnabled: false 
+
+# externalWebPort specifies the node port that should be allocated for the operator's web UI.
+# This parameter is required if 'webUIEnabled' is true.
+# Otherwise, it is ignored.
+externalWebPort: 31101
+
 # remoteDebugNodePortEnabled specifies whether or not the operator will start a Java remote debug server
 # on the provided port and suspend execution until a remote debugger has attached.
 # The 'internalDebugHttpPort' property controls the port number inside the Kubernetes

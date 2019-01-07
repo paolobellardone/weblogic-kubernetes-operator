@@ -2,7 +2,7 @@
 # Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
 
 {{- define "operator.operatorExternalService" }}
-{{- if or .externalRestEnabled .remoteDebugNodePortEnabled }}
+{{- if or .externalRestEnabled .remoteDebugNodePortEnabled .webUIEnabled}}
 ---
 apiVersion: "v1"
 kind: "Service"
@@ -21,6 +21,11 @@ spec:
     - name: "rest"
       port: 8081
       nodePort: {{ .externalRestHttpsPort }}
+    {{- end }}
+    {{- if .webUIEnabled }}
+    - name: "web"
+      port: 3000
+      nodePort: {{ .externalWebPort }}
     {{- end }}
     {{- if .remoteDebugNodePortEnabled }}
     - name: "debug"
