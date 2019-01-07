@@ -45,4 +45,3 @@ dependency-reduced-pom.xml
 *.iws
 **/node_modules
 **/.factorypath
-operator-web-ui/src/shared/Rest.js

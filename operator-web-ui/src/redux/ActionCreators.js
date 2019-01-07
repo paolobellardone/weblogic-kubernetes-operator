@@ -1,28 +1,23 @@
 import * as ActionTypes from './ActionTypes'
-import { REST_ADDRESS, REST_AUTH_HEADER, REST_CERT } from '../shared/Rest'
-import https from 'https'
+import { REST_ADDRESS, REST_AUTH_HEADER } from '../shared/Rest'
+// import https from 'https'
+import axios from 'axios'
 
 // operators
-
-const myAgent = new https.Agent({
-    cert: REST_CERT,
-    ca: [REST_CERT],
-    rejectUnauthorized: false
-})
 
 export const fetchOperators = () => (dispatch) => {
     dispatch(operatorsLoading(true))
 
-    return fetch(REST_ADDRESS + 'operator', {
-        method: 'GET',
+    console.log('token: ' + REST_AUTH_HEADER)
+
+    return axios(REST_ADDRESS + 'operator', {
+        method: 'get',
         mode: 'no-cors',
         headers: {
             'Authorization': REST_AUTH_HEADER,
             'Accept': 'application/json'
         },
-        cert: REST_CERT,
-        agent: myAgent,
-        credentials: 'include'
+        withCredentials: true
     })
         .then(response => {
             if (response.ok) {
