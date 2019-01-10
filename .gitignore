@@ -46,3 +46,4 @@ dependency-reduced-pom.xml
 **/node_modules
 **/.factorypath
 operator-web-ui/.env
+operator-web-ui/src/shared/Rest.js

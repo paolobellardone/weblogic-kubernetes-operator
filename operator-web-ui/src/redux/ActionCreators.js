@@ -8,8 +8,6 @@ import axios from 'axios'
 export const fetchOperators = () => (dispatch) => {
     dispatch(operatorsLoading(true))
 
-    console.log('token: ' + REST_AUTH_HEADER)
-
     return axios(REST_ADDRESS + 'operator', {
         method: 'get',
         mode: 'no-cors',
