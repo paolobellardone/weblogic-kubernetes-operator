@@ -1,4 +1,4 @@
-> **WARNING** This documentation is for version 1.0 of the operator.  To view documenation for the current release, [please click here](/site).
+> **WARNING** This documentation is for version 1.0 of the operator.  To view documentation for the current release, [please click here](/site).
 
 # Creating a WebLogic domain
 
@@ -190,8 +190,8 @@ The script will create a Kubernetes YAML file that is then used to create a Kube
 Here is the first part of that YAML file:
 
 ```
-# Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 apiVersion: batch/v1
 kind: Job
 metadata:

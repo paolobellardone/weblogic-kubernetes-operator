@@ -1,6 +1,5 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.work;
 
@@ -9,40 +8,26 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** Collection of {@link Fiber}s. Owns an {@link Executor} to run them. */
+/**
+ * Collection of {@link Fiber}s. Owns an {@link Executor} to run them.
+ */
 public class Engine {
   private static final int DEFAULT_THREAD_COUNT = 10;
-
-  public static ScheduledExecutorService wrappedExecutorService(String id, Container container) {
-    ScheduledThreadPoolExecutor threadPool =
-        new ScheduledThreadPoolExecutor(DEFAULT_THREAD_COUNT, new DaemonThreadFactory(id));
-    threadPool.setRemoveOnCancelPolicy(true);
-    return wrap(container, threadPool);
-  }
-
-  private volatile ScheduledExecutorService threadPool;
+  private final AtomicReference<ScheduledExecutorService> threadPool = new AtomicReference();
 
   /**
-   * Returns the executor
-   *
-   * @return executor
-   */
-  public ScheduledExecutorService getExecutor() {
-    return threadPool;
-  }
-
-  /**
-   * Creates engine with the specified executor
+   * Creates engine with the specified executor.
    *
    * @param threadPool Executor
    */
   public Engine(ScheduledExecutorService threadPool) {
-    this.threadPool = threadPool;
+    this.threadPool.set(threadPool);
   }
 
   /**
-   * Creates engine with the specified id and default container and executor
+   * Creates engine with the specified id and default container and executor.
    *
    * @param id Engine id
    */
@@ -50,12 +35,34 @@ public class Engine {
     this(wrappedExecutorService(id, ContainerResolver.getDefault().getContainer()));
   }
 
-  void addRunnable(Fiber fiber) {
-    getExecutor().execute(fiber);
+  /**
+   * wrapped executor service.
+   * @param id id
+   * @param container container
+   * @return executor service
+   */
+  public static ScheduledExecutorService wrappedExecutorService(String id, Container container) {
+    ScheduledThreadPoolExecutor threadPool =
+        new ScheduledThreadPoolExecutor(DEFAULT_THREAD_COUNT, new DaemonThreadFactory(id));
+    threadPool.setRemoveOnCancelPolicy(true);
+    return wrap(container, threadPool);
   }
 
   private static ScheduledExecutorService wrap(Container container, ScheduledExecutorService ex) {
     return container != null ? ContainerResolver.getDefault().wrapExecutor(container, ex) : ex;
+  }
+
+  /**
+   * Returns the executor.
+   *
+   * @return executor
+   */
+  public ScheduledExecutorService getExecutor() {
+    return threadPool.get();
+  }
+
+  void addRunnable(Fiber fiber) {
+    getExecutor().execute(fiber);
   }
 
   /**

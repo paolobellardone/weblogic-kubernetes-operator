@@ -1,25 +1,31 @@
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
+
 package oracle.kubernetes.operator.work;
+
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Queue;
+import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+import oracle.kubernetes.operator.calls.RetryStrategy;
+import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
+import oracle.kubernetes.operator.logging.LoggingContext;
 
 import static com.meterware.simplestub.Stub.createStrictStub;
 import static com.meterware.simplestub.Stub.createStub;
 import static oracle.kubernetes.operator.ProcessingConstants.DOMAIN_COMPONENT_NAME;
-
-import java.util.ArrayDeque;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Queue;
-import java.util.SortedSet;
-import java.util.TreeSet;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import oracle.kubernetes.operator.calls.RetryStrategy;
-import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
-import oracle.kubernetes.operator.helpers.KubernetesVersion;
+import static oracle.kubernetes.operator.logging.LoggingContext.LOGGING_CONTEXT_KEY;
 
 /**
  * Support for writing unit tests that use a fiber to run steps. Such tests can call #runStep to
@@ -33,16 +39,16 @@ import oracle.kubernetes.operator.helpers.KubernetesVersion;
  */
 @SuppressWarnings("UnusedReturnValue")
 public class FiberTestSupport {
-  private CompletionCallbackStub completionCallback = new CompletionCallbackStub();
-  private ScheduledExecutorStub schedule = ScheduledExecutorStub.create();
+  private static final Container container = new Container();
+  private final CompletionCallbackStub completionCallback = new CompletionCallbackStub();
+  private final ScheduledExecutorStub schedule = ScheduledExecutorStub.create();
+  private final Engine engine = new Engine(schedule);
+  private final Packet packet = new Packet();
 
-  private static Container container = new Container();
-  private Engine engine = new Engine(schedule);
   private Fiber fiber = engine.createFiber();
-  private Packet packet = new Packet();
 
   /** Creates a single-threaded FiberGate instance. */
-  public FiberGate createFiberGateStub() {
+  public FiberGate createFiberGate() {
     return new FiberGate(engine);
   }
 
@@ -57,6 +63,31 @@ public class FiberTestSupport {
   }
 
   /**
+   * Schedules a runnable to run at some time in the future. See {@link #schedule(Runnable)}.
+   *
+   * @param command a runnable to be executed by the scheduler.
+   * @param delay the number of time units in the future to run.
+   * @param unit the time unit used for the above parameters
+   */
+  public ScheduledFuture<?> schedule(@Nonnull Runnable command, long delay, @Nonnull TimeUnit unit) {
+    return schedule.schedule(command, delay, unit);
+  }
+
+  /**
+   * Schedules a runnable to run immediately and at fixed intervals afterwards. See {@link
+   * #schedule(Runnable)}.
+   *
+   * @param command a runnable to be executed by the scheduler.
+   * @param initialDelay the number of time units in the future to run for the first time.
+   * @param delay the number of time units between scheduled executions
+   * @param unit the time unit used for the above parameters
+   */
+  public ScheduledFuture<?> scheduleWithFixedDelay(
+      Runnable command, long initialDelay, long delay, TimeUnit unit) {
+    return schedule.scheduleWithFixedDelay(command, initialDelay, delay, unit);
+  }
+
+  /**
    * Returns true if an item is scheduled to run at the specified time.
    *
    * @param time the time, in units
@@ -64,6 +95,15 @@ public class FiberTestSupport {
    */
   public boolean hasItemScheduledAt(int time, TimeUnit unit) {
     return schedule.containsItemAt(time, unit);
+  }
+
+  /**
+   * Returns the engine used by this support object.
+   *
+   * @return the current engine object
+   */
+  public Engine getEngine() {
+    return engine;
   }
 
   /**
@@ -82,13 +122,12 @@ public class FiberTestSupport {
     return Collections.unmodifiableMap(packet.getComponents());
   }
 
-  public FiberTestSupport addToPacket(String key, Object value) {
-    packet.put(key, value);
-    return this;
+  public Packet getPacket() {
+    return packet;
   }
 
-  public FiberTestSupport removeFromPacket(String key) {
-    packet.put(key, null);
+  public FiberTestSupport addToPacket(String key, Object value) {
+    packet.put(key, value);
     return this;
   }
 
@@ -97,69 +136,81 @@ public class FiberTestSupport {
     return this;
   }
 
+  public FiberTestSupport addLoggingContext(LoggingContext loggingContext) {
+    packet.getComponents().put(LOGGING_CONTEXT_KEY, Component.createFor(loggingContext));
+    return this;
+  }
+
   public FiberTestSupport addRetryStrategy(RetryStrategy retryStrategy) {
     packet.getComponents().put("retry", Component.createFor(RetryStrategy.class, retryStrategy));
     return this;
   }
 
-  public <T> FiberTestSupport addComponent(String key, Class<T> aClass, T component) {
-    packet.getComponents().put(key, Component.createFor(aClass, component));
+  public <T> FiberTestSupport addComponent(String key, Class<T> aaClass, T component) {
+    packet.getComponents().put(key, Component.createFor(aaClass, component));
     return this;
   }
 
-  public <T> FiberTestSupport addContainerComponent(String key, Class<T> aClass, T component) {
-    container.getComponents().put(key, Component.createFor(aClass, component));
-    return this;
-  }
-
-  public FiberTestSupport addVersion(KubernetesVersion kubernetesVersion) {
-    packet
-        .getComponents()
-        .put("version", Component.createFor(KubernetesVersion.class, kubernetesVersion));
+  public <T> FiberTestSupport addContainerComponent(String key, Class<T> aaClass, T component) {
+    container.getComponents().put(key, Component.createFor(aaClass, component));
     return this;
   }
 
   /**
-   * Starts a unit-test fiber with the specified step
+   * Returns true if the specified action indicates that the fiber should be suspended.
+   * @param nextAction the action to check
+   * @return an indicator of the state of the nextAction instance
+   */
+  public static boolean isSuspendRequested(NextAction nextAction) {
+    return nextAction.kind == NextAction.Kind.SUSPEND;
+  }
+
+  /**
+   * Passes the specified fiber to the onExit function, if any.
+   */
+  public static void doOnExit(NextAction nextAction, AsyncFiber fiber) {
+    Optional.ofNullable(nextAction.onExit).orElse(f -> {}).accept(fiber);
+  }
+
+  /**
+   * Starts a unit-test fiber with the specified step.
    *
    * @param step the first step to run
    */
   public Packet runSteps(Step step) {
+    fiber = engine.createFiber();
     fiber.start(step, packet, completionCallback);
 
     return packet;
   }
 
   /**
-   * Starts a unit-test fiber with the specified step and runs until the fiber is done
+   * Starts a unit-test fiber with the specified step.
+   *
+   * @param nextStep the first step to run
+   */
+  public Packet runSteps(StepFactory factory, Step nextStep) {
+    fiber = engine.createFiber();
+    fiber.start(factory.createStepList(nextStep), packet, completionCallback);
+    return packet;
+  }
+
+  /**
+   * Starts a unit-test fiber with the specified step and runs until the fiber is done.
    *
    * @param step the first step to run
    */
   public Packet runStepsToCompletion(Step step) {
+    fiber = engine.createFiber();
     fiber.start(step, packet, completionCallback);
 
     // Wait for fiber to finish
     try {
       fiber.get();
-    } catch (InterruptedException | ExecutionException e) {
+    } catch (InterruptedException e) {
       throw new RuntimeException(e);
     }
     return packet;
-  }
-
-  /**
-   * Starts a unit-test fiber with the specified step
-   *
-   * @param nextStep the first step to run
-   */
-  public Packet runSteps(StepFactory factory, Step nextStep) {
-    fiber.start(factory.createStepList(nextStep), packet, completionCallback);
-    return packet;
-  }
-
-  @FunctionalInterface
-  public interface StepFactory {
-    Step createStepList(Step next);
   }
 
   /**
@@ -184,12 +235,17 @@ public class FiberTestSupport {
     completionCallback.throwOnFailure();
   }
 
+  @FunctionalInterface
+  public interface StepFactory {
+    Step createStepList(Step next);
+  }
+
   abstract static class ScheduledExecutorStub implements ScheduledExecutorService {
-    /** current time in milliseconds. */
+    /* current time in milliseconds. */
     private long currentTime = 0;
 
-    private SortedSet<ScheduledItem> scheduledItems = new TreeSet<>();
-    private Queue<Runnable> queue = new ArrayDeque<>();
+    private final SortedSet<ScheduledItem> scheduledItems = new TreeSet<>();
+    private final Queue<Runnable> queue = new ArrayDeque<>();
     private Runnable current;
 
     public static ScheduledExecutorStub create() {
@@ -201,13 +257,27 @@ public class FiberTestSupport {
     public ScheduledFuture<?> schedule(
         @Nonnull Runnable command, long delay, @Nonnull TimeUnit unit) {
       scheduledItems.add(new ScheduledItem(unit.toMillis(delay), command));
+      runNextRunnable();
+      return createStub(ScheduledFuture.class);
+    }
+
+    @Override
+    @Nonnull
+    public ScheduledFuture<?> scheduleWithFixedDelay(
+        @Nonnull Runnable command, long initialDelay, long delay, @Nonnull TimeUnit unit) {
+      scheduledItems.add(
+          new PeriodicScheduledItem(
+              currentTime + unit.toMillis(initialDelay), unit.toMillis(delay), command));
+      runNextRunnable();
       return createStub(ScheduledFuture.class);
     }
 
     @Override
     public void execute(@Nullable Runnable command) {
       queue.add(command);
-      if (current == null) runNextRunnable();
+      if (current == null) {
+        runNextRunnable();
+      }
     }
 
     private void runNextRunnable() {
@@ -224,7 +294,7 @@ public class FiberTestSupport {
     }
 
     /**
-     * Sets the simulated time, thus triggering the execution of any runnable iterms associated with
+     * Sets the simulated time, thus triggering the execution of any runnable items associated with
      * earlier times.
      *
      * @param time the time, in units
@@ -232,18 +302,22 @@ public class FiberTestSupport {
      */
     void setTime(long time, TimeUnit unit) {
       long newTime = unit.toMillis(time);
-      if (newTime < currentTime)
+      if (newTime < currentTime) {
         throw new IllegalStateException(
             "Attempt to move clock backwards from " + currentTime + " to " + newTime);
-
-      for (Iterator<ScheduledItem> it = scheduledItems.iterator(); it.hasNext(); ) {
-        ScheduledItem item = it.next();
-        if (item.atTime > newTime) break;
-        it.remove();
-        execute(item.runnable);
       }
 
+      List<ScheduledItem> itemsToRun = getItemsToRunByMsec(newTime);
+      scheduledItems.removeAll(itemsToRun);
+      itemsToRun.forEach(item -> execute(item.runnable));
+      itemsToRun.stream().filter(ScheduledItem::isReschedulable).forEach(scheduledItems::add);
+
       currentTime = newTime;
+    }
+
+    @Nonnull
+    private List<ScheduledItem> getItemsToRunByMsec(long newTime) {
+      return scheduledItems.stream().filter(item -> item.shouldRunBy(newTime)).collect(Collectors.toList());
     }
 
     /**
@@ -254,23 +328,54 @@ public class FiberTestSupport {
      * @return true if such an item exists
      */
     boolean containsItemAt(int time, TimeUnit unit) {
-      for (ScheduledItem scheduledItem : scheduledItems)
-        if (scheduledItem.atTime == unit.toMillis(time)) return true;
+      for (ScheduledItem scheduledItem : scheduledItems) {
+        if (scheduledItem.atTime == unit.toMillis(time)) {
+          return true;
+        }
+      }
       return false;
     }
 
     private static class ScheduledItem implements Comparable<ScheduledItem> {
-      private long atTime;
-      private Runnable runnable;
+      private final long atTime;
+      private final Runnable runnable;
 
       ScheduledItem(long atTime, Runnable runnable) {
         this.atTime = atTime;
         this.runnable = runnable;
       }
 
+      // Return true if the item should be rescheduled after it is run.
+      private boolean isReschedulable() {
+        return rescheduled() != null;
+      }
+
+      // Return true if the item is intended to run at or before the specified time in msec.
+      private boolean shouldRunBy(long newTime) {
+        return atTime <= newTime;
+      }
+
       @Override
       public int compareTo(@Nonnull ScheduledItem o) {
         return Long.compare(atTime, o.atTime);
+      }
+
+      ScheduledItem rescheduled() {
+        return null;
+      }
+    }
+
+    private static class PeriodicScheduledItem extends ScheduledItem {
+      private final long interval;
+
+      PeriodicScheduledItem(long atTime, long interval, Runnable runnable) {
+        super(atTime, runnable);
+        this.interval = interval;
+      }
+
+      @Override
+      ScheduledItem rescheduled() {
+        return new PeriodicScheduledItem(super.atTime + interval, interval, super.runnable);
       }
     }
   }
@@ -279,7 +384,8 @@ public class FiberTestSupport {
     private Throwable throwable;
 
     @Override
-    public void onCompletion(Packet packet) {}
+    public void onCompletion(Packet packet) {
+    }
 
     @Override
     public void onThrowable(Packet packet, Throwable throwable) {
@@ -296,11 +402,13 @@ public class FiberTestSupport {
       Throwable actual = throwable;
       throwable = null;
 
-      if (actual == null)
+      if (actual == null) {
         throw new AssertionError("Expected exception: " + throwableClass.getName());
-      if (!throwableClass.isInstance(actual))
+      }
+      if (!throwableClass.isInstance(actual)) {
         throw new AssertionError(
             "Expected exception: " + throwableClass.getName() + " but was " + actual);
+      }
     }
 
     /**
@@ -310,8 +418,12 @@ public class FiberTestSupport {
      * @throws Exception the exception reported as a failure
      */
     void throwOnFailure() throws Exception {
-      if (throwable == null) return;
-      if (throwable instanceof Error) throw (Error) throwable;
+      if (throwable == null) {
+        return;
+      }
+      if (throwable instanceof Error) {
+        throw (Error) throwable;
+      }
       throw (Exception) throwable;
     }
   }

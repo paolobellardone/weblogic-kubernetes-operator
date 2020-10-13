@@ -1,21 +1,21 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.authentication;
 
-import com.squareup.okhttp.OkHttpClient;
-import io.kubernetes.client.ApiClient;
-import io.kubernetes.client.ApiException;
-import io.kubernetes.client.models.V1ObjectReference;
-import io.kubernetes.client.models.V1Secret;
-import io.kubernetes.client.models.V1ServiceAccount;
-import io.kubernetes.client.util.Config;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.ApiException;
+import io.kubernetes.client.openapi.models.V1ObjectReference;
+import io.kubernetes.client.openapi.models.V1Secret;
+import io.kubernetes.client.openapi.models.V1ServiceAccount;
+import io.kubernetes.client.util.Config;
+import okhttp3.OkHttpClient;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
 
@@ -25,15 +25,14 @@ import oracle.kubernetes.operator.logging.LoggingFactory;
  */
 public class Authenticator {
 
-  private final ApiClient apiClient;
-  private final Helpers helper;
-  private String serviceToken;
-
-  private final String _SERVICE_HOST = "KUBERNETES_SERVICE_HOST";
-  private final String _SERVICE_PORT = "KUBERNETES_SERVICE_PORT";
+  private static final String SERVICE_HOST = "KUBERNETES_SERVICE_HOST";
+  private static final String SERVICE_PORT = "KUBERNETES_SERVICE_PORT";
   // private final String _TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token";
   // private final String _CACERT_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
   private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
+  private final ApiClient apiClient;
+  private final Helpers helper;
+  private String serviceToken;
 
   /**
    * Create a new instace of the Authenticator class containing the default API client. The default
@@ -93,9 +92,8 @@ public class Authenticator {
    * @param token service token for search.
    * @return ApiClient that has been properly authenticated
    * @throws ApiException on API Exception
-   * @throws IOException on IO Exception
    */
-  public ApiClient createClientByToken(String token) throws ApiException, IOException {
+  public ApiClient createClientByToken(String token) throws ApiException {
     V1ServiceAccount serviceAccount = helper.findServiceAccountByToken(token);
     return authenticateByServiceAccount(serviceAccount);
   }
@@ -161,8 +159,8 @@ public class Authenticator {
     }
     serviceToken = token;
 
-    String serviceHost = System.getenv(_SERVICE_HOST);
-    String servicePort = System.getenv(_SERVICE_PORT);
+    String serviceHost = System.getenv(SERVICE_HOST);
+    String servicePort = System.getenv(SERVICE_PORT);
     String serviceUrl = "https://" + serviceHost + ":" + servicePort;
 
     ApiClient newClient = new ApiClient();
@@ -178,9 +176,8 @@ public class Authenticator {
    * Close the ApiClient to make sure any open connection is cleaned up.
    *
    * @param apiClient ApiClient object that you want to close.
-   * @throws ApiException if there is an API error.
    */
-  public void closeClient(ApiClient apiClient) throws ApiException {
+  public void closeClient(ApiClient apiClient) {
 
     OkHttpClient httpClient = apiClient.getHttpClient();
     if (httpClient != null) {

@@ -1,36 +1,32 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.steps;
 
-import static oracle.kubernetes.operator.ProcessingConstants.NODE_PORT;
-import static oracle.kubernetes.operator.ProcessingConstants.PORT;
-import static oracle.kubernetes.operator.ProcessingConstants.SERVER_NAME;
-import static org.hamcrest.Matchers.hasEntry;
-import static org.hamcrest.Matchers.hasKey;
-import static org.hamcrest.Matchers.not;
-import static org.hamcrest.junit.MatcherAssert.assertThat;
-
-import com.meterware.simplestub.Memento;
-import io.kubernetes.client.models.V1ObjectMeta;
 import java.util.ArrayList;
 import java.util.List;
-import oracle.kubernetes.TestUtils;
+
+import com.meterware.simplestub.Memento;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
 import oracle.kubernetes.operator.ProcessingConstants;
-import oracle.kubernetes.operator.helpers.AsyncCallTestSupport;
 import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
 import oracle.kubernetes.operator.utils.WlsDomainConfigSupport;
+import oracle.kubernetes.operator.work.FiberTestSupport;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
 import oracle.kubernetes.operator.work.TerminalStep;
+import oracle.kubernetes.utils.TestUtils;
 import oracle.kubernetes.weblogic.domain.DomainConfigurator;
 import oracle.kubernetes.weblogic.domain.DomainConfiguratorFactory;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
-import oracle.kubernetes.weblogic.domain.v2.DomainSpec;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.DomainSpec;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+
+import static oracle.kubernetes.operator.ProcessingConstants.SERVER_NAME;
+import static org.hamcrest.Matchers.hasEntry;
+import static org.hamcrest.junit.MatcherAssert.assertThat;
 
 public class BeforeAdminServiceStepTest {
 
@@ -45,7 +41,7 @@ public class BeforeAdminServiceStepTest {
   private Step nextStep = new TerminalStep();
   private List<Memento> mementos = new ArrayList<>();
   private DomainPresenceInfo domainPresenceInfo = createDomainPresenceInfo();
-  private AsyncCallTestSupport testSupport = new AsyncCallTestSupport();
+  private FiberTestSupport testSupport = new FiberTestSupport();
   private BeforeAdminServiceStep step = new BeforeAdminServiceStep(nextStep);
 
   private DomainPresenceInfo createDomainPresenceInfo() {
@@ -61,13 +57,15 @@ public class BeforeAdminServiceStepTest {
   }
 
   private DomainSpec createDomainSpec() {
-    return new DomainSpec().withDomainUID(UID).withReplicas(1);
+    return new DomainSpec().withDomainUid(UID).withReplicas(1);
   }
 
+  /**
+   * Setup test environment.
+   */
   @Before
-  public void setUp() throws Exception {
+  public void setUp()  {
     mementos.add(TestUtils.silenceOperatorLogger());
-    mementos.add(testSupport.installRequestStepFactory());
     WlsDomainConfigSupport configSupport = new WlsDomainConfigSupport(DOMAIN_NAME);
     configSupport.addWlsServer(ADMIN_NAME, ADMIN_PORT_NUM);
     configSupport.setAdminServerName(ADMIN_NAME);
@@ -75,12 +73,21 @@ public class BeforeAdminServiceStepTest {
     testSupport
         .addToPacket(ProcessingConstants.DOMAIN_TOPOLOGY, configSupport.createDomainConfig())
         .addDomainPresenceInfo(domainPresenceInfo);
-    configurator.configureAdminServer();
+    configurator
+        .configureAdminServer()
+        .configureAdminService()
+        .withChannel("default", NODE_PORT_NUM);
   }
 
+  /**
+   * Cleanup test environment.
+   * @throws Exception if test support fails.
+   */
   @After
   public void tearDown() throws Exception {
-    for (Memento memento : mementos) memento.revert();
+    for (Memento memento : mementos) {
+      memento.revert();
+    }
 
     testSupport.throwOnCompletionFailure();
   }
@@ -90,22 +97,6 @@ public class BeforeAdminServiceStepTest {
     Packet packet = invokeStep();
 
     assertThat(packet, hasEntry(SERVER_NAME, ADMIN_NAME));
-    assertThat(packet, hasEntry(PORT, ADMIN_PORT_NUM));
-  }
-
-  @Test
-  public void whenAdminServerNodePortDefined_packetContainsItAfterProcessing() {
-    configurator.configureAdminServer().withNodePort(NODE_PORT_NUM);
-    Packet packet = invokeStep();
-
-    assertThat(packet, hasEntry(NODE_PORT, NODE_PORT_NUM));
-  }
-
-  @Test
-  public void whenAdminServerNodePortNotDefined_packetDoesNotContainItAfterProcessing() {
-    Packet packet = invokeStep();
-
-    assertThat(packet, not(hasKey(NODE_PORT)));
   }
 
   private Packet invokeStep() {

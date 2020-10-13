@@ -1,8 +1,31 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import io.kubernetes.client.openapi.models.NetworkingV1beta1Ingress;
+import io.kubernetes.client.openapi.models.V1ClusterRole;
+import io.kubernetes.client.openapi.models.V1ClusterRoleBinding;
+import io.kubernetes.client.openapi.models.V1ConfigMap;
+import io.kubernetes.client.openapi.models.V1Deployment;
+import io.kubernetes.client.openapi.models.V1Job;
+import io.kubernetes.client.openapi.models.V1Namespace;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1PersistentVolume;
+import io.kubernetes.client.openapi.models.V1PersistentVolumeClaim;
+import io.kubernetes.client.openapi.models.V1Role;
+import io.kubernetes.client.openapi.models.V1RoleBinding;
+import io.kubernetes.client.openapi.models.V1Secret;
+import io.kubernetes.client.openapi.models.V1Service;
+import io.kubernetes.client.openapi.models.V1ServiceAccount;
+import io.kubernetes.client.openapi.models.V1beta1APIService;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import org.apache.commons.codec.binary.Base64;
 
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.KIND_API_SERVICE;
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.KIND_CLUSTER_ROLE;
@@ -22,36 +45,20 @@ import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.KIND_SERV
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.KIND_SERVICE_ACCOUNT;
 import static oracle.kubernetes.operator.utils.YamlUtils.newYaml;
 
-import com.appscode.voyager.client.models.V1beta1Ingress;
-import io.kubernetes.client.models.ExtensionsV1beta1Deployment;
-import io.kubernetes.client.models.V1ClusterRole;
-import io.kubernetes.client.models.V1ClusterRoleBinding;
-import io.kubernetes.client.models.V1ConfigMap;
-import io.kubernetes.client.models.V1Job;
-import io.kubernetes.client.models.V1Namespace;
-import io.kubernetes.client.models.V1ObjectMeta;
-import io.kubernetes.client.models.V1PersistentVolume;
-import io.kubernetes.client.models.V1PersistentVolumeClaim;
-import io.kubernetes.client.models.V1Role;
-import io.kubernetes.client.models.V1RoleBinding;
-import io.kubernetes.client.models.V1Secret;
-import io.kubernetes.client.models.V1Service;
-import io.kubernetes.client.models.V1ServiceAccount;
-import io.kubernetes.client.models.V1beta1APIService;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
-import org.apache.commons.codec.binary.Base64;
-
-/** Holds the results of a kubernetes yaml file that has been converted to k8s typed java objects */
+/**
+ * Holds the results of a kubernetes yaml file that has been converted to k8s typed java objects.
+ */
 @SuppressWarnings("unchecked")
 public class ParsedKubernetesYaml {
 
   private Map<String, TypeHandler<?>> kindToHandler = new HashMap<>();
   private int objectCount = 0;
 
+  /**
+   * Construct parser.
+   * @param factory YAML reader factory
+   * @throws Exception on failure
+   */
   public ParsedKubernetesYaml(YamlReader factory) throws Exception {
     defineHandlers();
 
@@ -62,7 +69,7 @@ public class ParsedKubernetesYaml {
 
   // create handlers for all the supported k8s types
   private void defineHandlers() {
-    kindToHandler.put(KIND_API_SERVICE, new APIServiceHandler());
+    kindToHandler.put(KIND_API_SERVICE, new ApiServiceHandler());
     kindToHandler.put(KIND_CONFIG_MAP, new ConfigMapHandler());
     kindToHandler.put(KIND_CLUSTER_ROLE, new ClusterRoleHandler());
     kindToHandler.put(KIND_CLUSTER_ROLE_BINDING, new ClusterRoleBindingHandler());
@@ -127,7 +134,7 @@ public class ParsedKubernetesYaml {
     }
   */
 
-  TypeHandler<V1beta1APIService> getAPIServices() {
+  TypeHandler<V1beta1APIService> getApiServices() {
     return (TypeHandler<V1beta1APIService>) getHandler(KIND_API_SERVICE);
   }
 
@@ -143,16 +150,16 @@ public class ParsedKubernetesYaml {
     return (TypeHandler<V1ClusterRoleBinding>) getHandler(KIND_CLUSTER_ROLE_BINDING);
   }
 
-  TypeHandler<ExtensionsV1beta1Deployment> getDeployments() {
-    return (TypeHandler<ExtensionsV1beta1Deployment>) getHandler(KIND_DEPLOYMENT);
+  TypeHandler<V1Deployment> getDeployments() {
+    return (TypeHandler<V1Deployment>) getHandler(KIND_DEPLOYMENT);
   }
 
   TypeHandler<Domain> getDomains() {
     return (TypeHandler<Domain>) getHandler(KIND_DOMAIN);
   }
 
-  TypeHandler<V1beta1Ingress> getIngresses() {
-    return (TypeHandler<V1beta1Ingress>) getHandler(KIND_INGRESS);
+  TypeHandler<NetworkingV1beta1Ingress> getIngresses() {
+    return (TypeHandler<NetworkingV1beta1Ingress>) getHandler(KIND_INGRESS);
   }
 
   TypeHandler<V1Job> getJobs() {
@@ -208,6 +215,11 @@ public class ParsedKubernetesYaml {
       this.k8sClass = k8sClass;
     }
 
+    /**
+     * fine.
+     * @param name name
+     * @return item
+     */
     public T find(String name) {
       T result = null;
       for (T instance : instances) {
@@ -236,16 +248,6 @@ public class ParsedKubernetesYaml {
       return result;
     }
 
-    private String getInstanceNames() {
-      StringBuilder sb = new StringBuilder();
-      for (T instance : instances) {
-        sb.append(sb.length() == 0 ? "[" : ", ");
-        sb.append(getName(instance));
-      }
-      sb.append("]");
-      return sb.toString();
-    }
-
     protected T find(String name, String namespace) {
       T result = null;
       for (T instance : instances) {
@@ -268,6 +270,20 @@ public class ParsedKubernetesYaml {
       return result;
     }
 
+    private String getInstanceNames() {
+      StringBuilder sb = new StringBuilder();
+      for (T instance : instances) {
+        sb.append(sb.length() == 0 ? "[" : ", ");
+        sb.append(getName(instance));
+      }
+      sb.append("]");
+      return sb.toString();
+    }
+
+    /**
+     * Add objects.
+     * @param objectAsMap objects
+     */
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void add(Map objectAsMap) {
       // convert the map to a yaml string then convert the yaml string to the
@@ -288,21 +304,9 @@ public class ParsedKubernetesYaml {
     }
   }
 
-  private static class APIServiceHandler extends TypeHandler<V1beta1APIService> {
-    private APIServiceHandler() {
+  private static class ApiServiceHandler extends TypeHandler<V1beta1APIService> {
+    private ApiServiceHandler() {
       super(V1beta1APIService.class);
-    }
-
-    @Override
-    protected V1ObjectMeta getMetadata(V1beta1APIService instance) {
-      return instance.getMetadata();
-    }
-
-    @SuppressWarnings("rawtypes")
-    @Override
-    public void add(Map objectAsMap) {
-      convertCaBundleFromBase64EncodedStringToByteArray(objectAsMap);
-      super.add(objectAsMap);
     }
 
     /**
@@ -320,15 +324,30 @@ public class ParsedKubernetesYaml {
         return;
       }
       Object caBundle = specAsMap.get("caBundle");
-      if (caBundle == null) return;
+      if (caBundle == null) {
+        return;
+      }
 
       byte[] caBundleAsBytes;
-      if (caBundle instanceof byte[]) caBundleAsBytes = (byte[]) caBundle;
-      else {
+      if (caBundle instanceof byte[]) {
+        caBundleAsBytes = (byte[]) caBundle;
+      } else {
         String caBundleValueAsBase64EncodedString = (String) caBundle;
         caBundleAsBytes = Base64.decodeBase64(caBundleValueAsBase64EncodedString);
       }
       specAsMap.put("caBundle", caBundleAsBytes);
+    }
+
+    @Override
+    protected V1ObjectMeta getMetadata(V1beta1APIService instance) {
+      return instance.getMetadata();
+    }
+
+    @SuppressWarnings("rawtypes")
+    @Override
+    public void add(Map objectAsMap) {
+      convertCaBundleFromBase64EncodedStringToByteArray(objectAsMap);
+      super.add(objectAsMap);
     }
   }
 
@@ -365,13 +384,13 @@ public class ParsedKubernetesYaml {
     }
   }
 
-  private static class DeploymentHandler extends TypeHandler<ExtensionsV1beta1Deployment> {
+  private static class DeploymentHandler extends TypeHandler<V1Deployment> {
     private DeploymentHandler() {
-      super(ExtensionsV1beta1Deployment.class);
+      super(V1Deployment.class);
     }
 
     @Override
-    protected V1ObjectMeta getMetadata(ExtensionsV1beta1Deployment instance) {
+    protected V1ObjectMeta getMetadata(V1Deployment instance) {
       return instance.getMetadata();
     }
   }
@@ -387,13 +406,13 @@ public class ParsedKubernetesYaml {
     }
   }
 
-  private static class IngressHandler extends TypeHandler<V1beta1Ingress> {
+  private static class IngressHandler extends TypeHandler<NetworkingV1beta1Ingress> {
     private IngressHandler() {
-      super(V1beta1Ingress.class);
+      super(NetworkingV1beta1Ingress.class);
     }
 
     @Override
-    protected V1ObjectMeta getMetadata(V1beta1Ingress instance) {
+    protected V1ObjectMeta getMetadata(NetworkingV1beta1Ingress instance) {
       return instance.getMetadata();
     }
   }
@@ -469,18 +488,6 @@ public class ParsedKubernetesYaml {
       super(V1Secret.class);
     }
 
-    @Override
-    protected V1ObjectMeta getMetadata(V1Secret instance) {
-      return instance.getMetadata();
-    }
-
-    @SuppressWarnings("rawtypes")
-    @Override
-    public void add(Map objectAsMap) {
-      convertSecretsFromBase64EncodedStringsToByteArrays(objectAsMap);
-      super.add(objectAsMap);
-    }
-
     /**
      * The kubernetes server expects that secrets in yaml are base64 encoded strings. On the other
      * hand, the kubernetes secrets class expects that secrets in yaml are byte arrays. Convert from
@@ -507,6 +514,18 @@ public class ParsedKubernetesYaml {
     private static byte[] decodeString(String secret) {
       String secretValueAsBase64EncodedString = secret;
       return Base64.decodeBase64(secretValueAsBase64EncodedString);
+    }
+
+    @Override
+    protected V1ObjectMeta getMetadata(V1Secret instance) {
+      return instance.getMetadata();
+    }
+
+    @SuppressWarnings("rawtypes")
+    @Override
+    public void add(Map objectAsMap) {
+      convertSecretsFromBase64EncodedStringsToByteArrays(objectAsMap);
+      super.add(objectAsMap);
     }
   }
 

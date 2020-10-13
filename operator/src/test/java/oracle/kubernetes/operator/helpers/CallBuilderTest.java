@@ -1,12 +1,13 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helpers;
 
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.instanceOf;
-import static org.hamcrest.junit.MatcherAssert.assertThat;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.function.Consumer;
 
 import com.google.gson.GsonBuilder;
 import com.meterware.pseudoserver.HttpUserAgentTest;
@@ -14,46 +15,44 @@ import com.meterware.pseudoserver.PseudoServlet;
 import com.meterware.pseudoserver.WebResource;
 import com.meterware.simplestub.Memento;
 import com.meterware.simplestub.StaticStubSupport;
-import io.kubernetes.client.ApiClient;
-import io.kubernetes.client.ApiException;
-import io.kubernetes.client.models.V1DeleteOptions;
-import io.kubernetes.client.models.V1ObjectMeta;
-import io.kubernetes.client.models.V1PersistentVolume;
-import io.kubernetes.client.models.V1PersistentVolumeClaim;
-import io.kubernetes.client.models.V1PersistentVolumeClaimSpec;
-import io.kubernetes.client.models.V1PersistentVolumeSpec;
-import io.kubernetes.client.models.V1Status;
-import io.kubernetes.client.models.VersionInfo;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.function.Consumer;
-import oracle.kubernetes.TestUtils;
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.ApiException;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1PersistentVolumeClaimSpec;
+import io.kubernetes.client.openapi.models.VersionInfo;
+import oracle.kubernetes.operator.KubernetesConstants;
 import oracle.kubernetes.operator.calls.RequestParams;
 import oracle.kubernetes.operator.calls.SynchronousCallDispatcher;
 import oracle.kubernetes.operator.calls.SynchronousCallFactory;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
-import oracle.kubernetes.weblogic.domain.v2.DomainList;
+import oracle.kubernetes.utils.TestUtils;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.DomainList;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
+import static java.net.HttpURLConnection.HTTP_CONFLICT;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.junit.MatcherAssert.assertThat;
+
 @SuppressWarnings("SameParameterValue")
 public class CallBuilderTest extends HttpUserAgentTest {
   private static final String NAMESPACE = "testspace";
-  private static final String NAME = "name";
   private static final String UID = "uid";
   private static final String DOMAIN_RESOURCE =
-      String.format("/apis/weblogic.oracle/v2/namespaces/%s/domains", NAMESPACE);
-  private static final String PV_RESOURCE = "/api/v1/persistentvolumes";
-  private static final String PVC_RESOURCE =
-      String.format("/api/v1/namespaces/%s/persistentvolumeclaims", NAMESPACE);
+      String.format(
+          "/apis/weblogic.oracle/" + KubernetesConstants.DOMAIN_VERSION + "/namespaces/%s/domains",
+          NAMESPACE);
 
   private static ApiClient apiClient = new ApiClient();
   private List<Memento> mementos = new ArrayList<>();
   private CallBuilder callBuilder = new CallBuilder();
   private Object requestBody;
+
+  private static String toJson(Object object) {
+    return new GsonBuilder().create().toJson(object);
+  }
 
   @Before
   public void setUp() throws NoSuchFieldException {
@@ -61,9 +60,14 @@ public class CallBuilderTest extends HttpUserAgentTest {
     mementos.add(PseudoServletCallDispatcher.install(getHostPath()));
   }
 
+  /**
+   * Tear down test.
+   */
   @After
-  public void tearDown() throws Exception {
-    for (Memento memento : mementos) memento.revert();
+  public void tearDown() {
+    for (Memento memento : mementos) {
+      memento.revert();
+    }
   }
 
   @Test
@@ -93,76 +97,28 @@ public class CallBuilderTest extends HttpUserAgentTest {
     assertThat(requestBody, equalTo(domain));
   }
 
-  @Test
-  public void createPV_returnsVolumeAsJson() throws ApiException {
-    V1PersistentVolume volume = createPersistentVolume();
-    defineHttpPostResponse(PV_RESOURCE, volume);
+  @Test(expected = ApiException.class)
+  public void replaceDomain_errorResonseCode_throws() throws ApiException {
+    Domain domain = new Domain().withMetadata(createMetadata());
+    defineHttpPutResponse(DOMAIN_RESOURCE, UID, domain, new ErrorCodePutServlet(HTTP_BAD_REQUEST));
 
-    assertThat(callBuilder.createPersistentVolume(volume), equalTo(volume));
+    callBuilder.replaceDomain(UID, NAMESPACE, domain);
   }
 
-  private V1PersistentVolume createPersistentVolume() {
-    return new V1PersistentVolume().metadata(createMetadata()).spec(new V1PersistentVolumeSpec());
-  }
+  @Test(expected = ApiException.class)
+  public void replaceDomain_conflictResponseCode_throws() throws ApiException {
+    Domain domain = new Domain().withMetadata(createMetadata());
+    defineHttpPutResponse(DOMAIN_RESOURCE, UID, domain, new ErrorCodePutServlet(HTTP_CONFLICT));
 
-  @Test
-  public void createPV_sendsClaimAsJson() throws ApiException {
-    V1PersistentVolume volume = createPersistentVolume();
-    defineHttpPostResponse(
-        PV_RESOURCE, volume, (json) -> requestBody = fromJson(json, V1PersistentVolume.class));
-
-    callBuilder.createPersistentVolume(volume);
-
-    assertThat(requestBody, equalTo(volume));
-  }
-
-  @Test
-  public void deletePV_returnsStatus() throws ApiException {
-    defineHttpDeleteResponse(PV_RESOURCE, NAME, new V1Status());
-
-    assertThat(
-        callBuilder.deletePersistentVolume(NAME, new V1DeleteOptions()),
-        instanceOf(V1Status.class));
-  }
-
-  @Test
-  public void createPVC_returnsClaimAsJson() throws ApiException {
-    V1PersistentVolumeClaim claim = createPersistentVolumeClaim();
-    defineHttpPostResponse(PVC_RESOURCE, claim);
-
-    assertThat(callBuilder.createPersistentVolumeClaim(claim), equalTo(claim));
-  }
-
-  private V1PersistentVolumeClaim createPersistentVolumeClaim() {
-    return new V1PersistentVolumeClaim().metadata(createMetadata()).spec(createSpec());
-  }
-
-  @Test
-  public void createPVC_sendsClaimAsJson() throws ApiException {
-    V1PersistentVolumeClaim claim = createPersistentVolumeClaim();
-    defineHttpPostResponse(
-        PVC_RESOURCE, claim, (json) -> requestBody = fromJson(json, V1PersistentVolumeClaim.class));
-
-    callBuilder.createPersistentVolumeClaim(claim);
-
-    assertThat(requestBody, equalTo(claim));
-  }
-
-  @Test
-  public void deletePVC_returnsStatus() throws ApiException {
-    defineHttpDeleteResponse(PVC_RESOURCE, NAME, new V1Status());
-
-    assertThat(
-        callBuilder.deletePersistentVolumeClaim(NAME, NAMESPACE, new V1DeleteOptions()),
-        instanceOf(V1Status.class));
+    callBuilder.replaceDomain(UID, NAMESPACE, domain);
   }
 
   private V1PersistentVolumeClaimSpec createSpec() {
     return new V1PersistentVolumeClaimSpec().volumeName("TEST_VOL");
   }
 
-  private Object fromJson(String json, Class<?> aClass) {
-    return new GsonBuilder().create().fromJson(json, aClass);
+  private Object fromJson(String json, Class<?> aaClass) {
+    return new GsonBuilder().create().fromJson(json, aaClass);
   }
 
   private V1ObjectMeta createMetadata() {
@@ -190,16 +146,19 @@ public class CallBuilderTest extends HttpUserAgentTest {
     defineResource(resourceName + "/" + name, new JsonPutServlet(response, bodyValidation));
   }
 
+  @SuppressWarnings("unused")
+  private void defineHttpPutResponse(
+      String resourceName, String name, Object response, PseudoServlet pseudoServlet) {
+    defineResource(resourceName + "/" + name, pseudoServlet);
+  }
+
   private void defineHttpDeleteResponse(String resourceName, String name, Object response) {
     defineResource(resourceName + "/" + name, new JsonDeleteServlet(response));
   }
 
-  private static String toJson(Object object) {
-    return new GsonBuilder().create().toJson(object);
-  }
-
   static class PseudoServletCallDispatcher implements SynchronousCallDispatcher {
     private static String basePath;
+    private SynchronousCallDispatcher underlyingDispatcher;
 
     static Memento install(String basePath) throws NoSuchFieldException {
       PseudoServletCallDispatcher.basePath = basePath;
@@ -208,8 +167,6 @@ public class CallBuilderTest extends HttpUserAgentTest {
       dispatcher.setUnderlyingDispatcher(memento.getOriginalValue());
       return memento;
     }
-
-    private SynchronousCallDispatcher underlyingDispatcher;
 
     void setUnderlyingDispatcher(SynchronousCallDispatcher underlyingDispatcher) {
       this.underlyingDispatcher = underlyingDispatcher;
@@ -234,6 +191,22 @@ public class CallBuilderTest extends HttpUserAgentTest {
     }
   }
 
+  static class ErrorCodePutServlet extends PseudoServlet {
+
+    final int errorCode;
+    int numGetPutResponseCalled = 0;
+
+    ErrorCodePutServlet(int errorCode) {
+      this.errorCode = errorCode;
+    }
+
+    @Override
+    public WebResource getPutResponse() {
+      numGetPutResponseCalled++;
+      return new WebResource("", errorCode);
+    }
+  }
+
   abstract static class JsonServlet extends PseudoServlet {
 
     private WebResource response;
@@ -252,12 +225,17 @@ public class CallBuilderTest extends HttpUserAgentTest {
       List<String> validationErrors = new ArrayList<>();
       for (ParameterExpectation expectation : parameterExpectations) {
         String error = expectation.validate();
-        if (error != null) validationErrors.add(error);
+        if (error != null) {
+          validationErrors.add(error);
+        }
       }
 
-      if (!validationErrors.isEmpty()) throw new IOException(String.join("\n", validationErrors));
+      if (!validationErrors.isEmpty()) {
+        throw new IOException(String.join("\n", validationErrors));
+      }
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     JsonServlet expectingParameter(String name, String value) {
       parameterExpectations.add(new ParameterExpectation(name, value));
       return this;
@@ -274,7 +252,9 @@ public class CallBuilderTest extends HttpUserAgentTest {
 
       String validate() {
         String value = getParameter(name) == null ? null : String.join(",", getParameter(name));
-        if (expectedValue.equals(value)) return null;
+        if (expectedValue.equals(value)) {
+          return null;
+        }
 
         return String.format("Expected parameter %s = %s but was %s", name, expectedValue, value);
       }
@@ -303,7 +283,9 @@ public class CallBuilderTest extends HttpUserAgentTest {
 
     @Override
     WebResource getResponse() throws IOException {
-      if (bodyValidation != null) bodyValidation.accept(new String(getBody()));
+      if (bodyValidation != null) {
+        bodyValidation.accept(new String(getBody()));
+      }
       return super.getResponse();
     }
   }
@@ -325,10 +307,6 @@ public class CallBuilderTest extends HttpUserAgentTest {
   }
 
   static class JsonPutServlet extends JsonBodyServlet {
-
-    private JsonPutServlet(Object returnValue) {
-      this(returnValue, null);
-    }
 
     private JsonPutServlet(Object returnValue, Consumer<String> bodyValidation) {
       super(returnValue, bodyValidation);

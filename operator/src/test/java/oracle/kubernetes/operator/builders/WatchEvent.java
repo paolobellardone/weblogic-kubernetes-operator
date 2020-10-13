@@ -1,15 +1,16 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.builders;
 
-import com.google.gson.GsonBuilder;
-import com.google.gson.annotations.SerializedName;
-import io.kubernetes.client.models.V1Status;
-import io.kubernetes.client.util.Watch;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.math.BigInteger;
+
+import com.google.gson.GsonBuilder;
+import com.google.gson.annotations.SerializedName;
+import io.kubernetes.client.openapi.models.V1Status;
+import io.kubernetes.client.util.Watch;
 
 /**
  * This class is the test equivalent of the Watch.Response type which is returned by a Watch object.
@@ -48,16 +49,20 @@ public class WatchEvent<T> {
     return new WatchEvent<>("DELETED", object);
   }
 
+  public static <S> WatchEvent<S> createErrorEventWithoutStatus() {
+    return new WatchEvent<>(null);
+  }
+
   public static <S> WatchEvent<S> createErrorEvent(int statusCode) {
     return new WatchEvent<>(new V1Status().code(statusCode).message("Oops"));
   }
 
-  public static <S> WatchEvent<S> createErrorEvent(int statusCode, int resourceVersion) {
+  public static <S> WatchEvent<S> createErrorEvent(int statusCode, BigInteger resourceVersion) {
     return new WatchEvent<>(
         new V1Status().code(statusCode).message(createMessageWithResourceVersion(resourceVersion)));
   }
 
-  private static String createMessageWithResourceVersion(int resourceVersion) {
+  private static String createMessageWithResourceVersion(BigInteger resourceVersion) {
     return String.format("Something wrong: continue from (%d)", resourceVersion);
   }
 
@@ -65,10 +70,17 @@ public class WatchEvent<T> {
     return new GsonBuilder().create().toJson(toWatchResponse());
   }
 
+  /**
+   * Convert watch event to response.
+   * @return watch response
+   */
   public Watch.Response<T> toWatchResponse() {
     try {
-      if (type.equals("ERROR")) return toErrorWatchResponse();
-      else return toUpdateWatchResponse();
+      if (type.equals("ERROR")) {
+        return toErrorWatchResponse();
+      } else {
+        return toUpdateWatchResponse();
+      }
     } catch (NoSuchMethodException
         | IllegalAccessException
         | InstantiationException

@@ -1,8 +1,12 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.create;
+
+import io.kubernetes.client.openapi.models.V1Container;
+import io.kubernetes.client.openapi.models.V1Deployment;
+import io.kubernetes.client.openapi.models.V1Service;
+import oracle.kubernetes.operator.utils.OperatorYamlFactory;
 
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.newContainer;
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.newEmptyDirVolumeSource;
@@ -11,15 +15,10 @@ import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.newLocalO
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.newVolume;
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.newVolumeMount;
 
-import io.kubernetes.client.models.ExtensionsV1beta1Deployment;
-import io.kubernetes.client.models.V1Container;
-import io.kubernetes.client.models.V1Service;
-import oracle.kubernetes.operator.utils.OperatorYamlFactory;
-
 /**
  * Tests that the artifacts in the yaml files that create-weblogic-operator.sh creates are correct
  * when all optional features are enabled: external rest self signed cert remote debug port enabled
- * elk enabled haveimage pull secret
+ * elk enabled have image pull secret
  */
 public abstract class CreateOperatorGeneratedFilesOptionalFeaturesEnabledTestBase
     extends CreateOperatorGeneratedFilesTestBase {
@@ -31,6 +30,7 @@ public abstract class CreateOperatorGeneratedFilesOptionalFeaturesEnabledTestBas
             .newOperatorValues()
             .setupExternalRestEnabled()
             .enableDebugging()
+            .suspendOnDebugStartup("true")
             .elkIntegrationEnabled("true")
             .weblogicOperatorImagePullSecretName("test-operator-image-pull-secret-name"));
   }
@@ -51,14 +51,13 @@ public abstract class CreateOperatorGeneratedFilesOptionalFeaturesEnabledTestBas
   }
 
   @Override
-  public ExtensionsV1beta1Deployment getExpectedWeblogicOperatorDeployment() {
-    ExtensionsV1beta1Deployment expected = super.getExpectedWeblogicOperatorDeployment();
+  public V1Deployment getExpectedWeblogicOperatorDeployment() {
+    V1Deployment expected = super.getExpectedWeblogicOperatorDeployment();
     V1Container operatorContainer =
         expected.getSpec().getTemplate().getSpec().getContainers().get(0);
-    operatorContainer
-        .addVolumeMountsItem(newVolumeMount().name("log-dir").mountPath("/logs").readOnly(false))
-        .addEnvItem(
-            newEnvVar().name("REMOTE_DEBUG_PORT").value(getInputs().getInternalDebugHttpPort()));
+    operatorContainer.addVolumeMountsItem(
+        newVolumeMount().name("log-dir").mountPath("/logs").readOnly(false));
+    expectRemoteDebug(operatorContainer, "y");
     expected
         .getSpec()
         .getTemplate()

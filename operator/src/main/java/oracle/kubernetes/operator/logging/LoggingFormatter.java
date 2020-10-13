@@ -1,14 +1,8 @@
-// Copyright 2017, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.logging;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.kubernetes.client.ApiException;
-import io.kubernetes.client.JSON;
-import io.swagger.annotations.ApiModel;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.text.SimpleDateFormat;
@@ -17,9 +11,18 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.logging.Formatter;
 import java.util.logging.LogRecord;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.kubernetes.client.openapi.ApiException;
+import io.kubernetes.client.openapi.JSON;
+import io.swagger.annotations.ApiModel;
+import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
 import oracle.kubernetes.operator.work.Fiber;
+import oracle.kubernetes.operator.work.Packet;
 
 /** Custom log formatter to format log messages in JSON format. */
 public class LoggingFormatter extends Formatter {
@@ -29,6 +32,8 @@ public class LoggingFormatter extends Formatter {
   private static final String TIMESTAMP = "timestamp";
   private static final String THREAD = "thread";
   private static final String FIBER = "fiber";
+  private static final String DOMAIN_UID = "domainUID";
+  private static final String DOMAIN_NAMESPACE = "namespace";
   private static final String SOURCE_CLASS = "class";
   private static final String SOURCE_METHOD = "method";
   private static final String TIME_IN_MILLIS = "timeInMillis";
@@ -58,7 +63,7 @@ public class LoggingFormatter extends Formatter {
 
     // the toString() format for the model classes is inappropriate for our logs
     // so, replace with the JSON serialization
-    JSON j = LoggingFactory.getJSON();
+    JSON j = LoggingFactory.getJson();
     if (j != null) {
       Object[] parameters = record.getParameters();
       if (parameters != null) {
@@ -75,7 +80,7 @@ public class LoggingFormatter extends Formatter {
       }
     }
 
-    String message = formatMessage(record);
+    final String message = formatMessage(record);
     String code = "";
     Map<String, List<String>> headers = PLACEHOLDER;
     String body = "";
@@ -94,7 +99,9 @@ public class LoggingFormatter extends Formatter {
           headers = ae.getResponseHeaders();
         }
         String rb = ae.getResponseBody();
-        if (rb != null) body = rb;
+        if (rb != null) {
+          body = rb;
+        }
       }
     }
     String level = record.getLevel().getLocalizedName();
@@ -107,6 +114,8 @@ public class LoggingFormatter extends Formatter {
     map.put(TIMESTAMP, dateString);
     map.put(THREAD, thread);
     map.put(FIBER, fiber != null ? fiber.toString() : "");
+    map.put(DOMAIN_NAMESPACE, getNamespace(fiber));
+    map.put(DOMAIN_UID, getDomainUid(fiber));
     map.put(LOG_LEVEL, level);
     map.put(SOURCE_CLASS, sourceClassName);
     map.put(SOURCE_METHOD, sourceMethodName);
@@ -125,7 +134,8 @@ public class LoggingFormatter extends Formatter {
 
     } catch (JsonProcessingException e) {
       String tmp =
-          "{\"@timestamp\":%1$s,\"level\":%2$s, \"class\":%3$s, \"method\":\"format\", \"timeInMillis\":%4$d, \"@message\":\"Exception while preparing json object\",\"exception\":%5$s}\n";
+          "{\"@timestamp\":%1$s,\"level\":%2$s, \"class\":%3$s, \"method\":\"format\", \"timeInMillis\":%4$d, "
+              + "\"@message\":\"Exception while preparing json object\",\"exception\":%5$s}\n";
       return String.format(
           tmp,
           dateString,
@@ -136,4 +146,54 @@ public class LoggingFormatter extends Formatter {
     }
     return json + "\n";
   }
+
+  /**
+   * Get the domain UID associated with the current log message.
+   * Check the fiber that is currently being used to execute the step that initiates the log.
+   * If there is no fiber associated with this log, check the ThreadLocal.
+   *
+   * @param fiber The current Fiber
+   * @return the domain UID or empty string
+   */
+  private String getDomainUid(Fiber fiber) {
+    return Optional.ofNullable(fiber)
+          .map(Fiber::getPacket)
+          .map(this::getDomainPresenceInfo)
+          .map(DomainPresenceInfo::getDomainUid)
+          .orElse(getDomainUidFromThreadContext());
+  }
+
+  private DomainPresenceInfo getDomainPresenceInfo(Packet packet) {
+    return packet.getSpi(DomainPresenceInfo.class);
+  }
+
+  private String getDomainUidFromThreadContext() {
+    return LoggingContext.optionalContext().map(LoggingContext::domainUid).orElse("");
+  }
+
+  /**
+   * Get the namespace associated with the current log message.
+   * Check the fiber that is currently being used to execute the step that initiate the log.
+   * If there is no fiber associated with this log, check the ThreadLocal.
+   *
+   * @param fiber The current Fiber
+   * @return the namespace or empty string
+   */
+  private String getNamespace(Fiber fiber) {
+    return Optional.ofNullable(fiber)
+          .map(Fiber::getPacket)
+          .map(this::getDomainPresenceInfo)
+          .map(DomainPresenceInfo::getNamespace)
+          .orElse(getNamespaceFromLoggingContext(fiber));
+  }
+
+  private String getNamespaceFromLoggingContext(Fiber fiber) {
+    return Optional.ofNullable(fiber)
+          .map(Fiber::getPacket)
+          .map(p -> p.getSpi(LoggingContext.class))
+          .or(LoggingContext::optionalContext)
+          .map(LoggingContext::namespace)
+          .orElse("");
+  }
+
 }

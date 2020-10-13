@@ -1,15 +1,17 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.wlsconfig;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 
 public class WlsDynamicServerConfigTest {
 
@@ -19,8 +21,7 @@ public class WlsDynamicServerConfigTest {
     List<NetworkAccessPoint> networkAccessPointList = new ArrayList<>();
     networkAccessPointList.add(networkAccessPoint);
     WlsServerConfig template =
-        new WlsServerConfig(
-            "template1", 1000, null, 2000, true, null, networkAccessPointList, null, false);
+        new WlsServerConfig("template1", null, null, 1000, 2000, null, networkAccessPointList);
 
     WlsServerConfig wlsServerConfig =
         WlsDynamicServerConfig.create("server1", 2, "cluster1", "domain1", false, template);
@@ -38,8 +39,7 @@ public class WlsDynamicServerConfigTest {
     List<NetworkAccessPoint> networkAccessPointList = new ArrayList<>();
     networkAccessPointList.add(networkAccessPoint);
     WlsServerConfig template =
-        new WlsServerConfig(
-            "template1", null, null, null, true, null, networkAccessPointList, null, false);
+        new WlsServerConfig("template1", null, null, null, null, null, networkAccessPointList);
 
     WlsServerConfig wlsServerConfig =
         WlsDynamicServerConfig.create("server1", 2, "cluster1", "domain1", false, template);
@@ -57,8 +57,7 @@ public class WlsDynamicServerConfigTest {
     List<NetworkAccessPoint> networkAccessPointList = new ArrayList<>();
     networkAccessPointList.add(networkAccessPoint);
     WlsServerConfig template =
-        new WlsServerConfig(
-            "template1", 1000, null, 2000, true, null, networkAccessPointList, null, false);
+        new WlsServerConfig("template1", null, null, 1000, 2000, null, networkAccessPointList);
 
     WlsServerConfig wlsServerConfig =
         WlsDynamicServerConfig.create("server1", 2, "cluster1", "domain1", true, template);
@@ -76,8 +75,7 @@ public class WlsDynamicServerConfigTest {
     List<NetworkAccessPoint> networkAccessPointList = new ArrayList<>();
     networkAccessPointList.add(networkAccessPoint);
     WlsServerConfig template =
-        new WlsServerConfig(
-            "template1", null, null, null, true, null, networkAccessPointList, null, false);
+        new WlsServerConfig("template1", null, null, null, null, null, networkAccessPointList);
 
     WlsServerConfig wlsServerConfig =
         WlsDynamicServerConfig.create("server1", 2, "cluster1", "domain1", true, template);
@@ -87,5 +85,18 @@ public class WlsDynamicServerConfigTest {
     NetworkAccessPoint networkAccessPoint1 = wlsServerConfig.getNetworkAccessPoints().get(0);
     assertEquals(new Integer(9102), networkAccessPoint1.getListenPort());
     assertNull(networkAccessPoint1.getPublicPort());
+  }
+
+  @Test
+  public void verifyAdminPortIsSetOnServerConfigs() {
+    final int adminPort = 9002;
+    List<NetworkAccessPoint> networkAccessPointList = new ArrayList<>();
+    WlsServerConfig template =
+        new WlsServerConfig("template1", null, null, null, null, 9002, networkAccessPointList);
+
+    WlsServerConfig wlsServerConfig =
+        WlsDynamicServerConfig.create("server1", 2, "cluster1", "domain1", true, template);
+
+    assertThat(wlsServerConfig.getAdminPort(), is(adminPort));
   }
 }

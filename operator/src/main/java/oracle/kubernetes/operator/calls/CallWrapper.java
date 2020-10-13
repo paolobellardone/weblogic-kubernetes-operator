@@ -1,15 +1,14 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.calls;
 
-import com.squareup.okhttp.Call;
+import okhttp3.Call;
 
 /** A wrapper for an OKHttp call to isolate its own callers. */
 public class CallWrapper implements CancellableCall {
 
-  private Call underlyingCall;
+  private final Call underlyingCall;
 
   public CallWrapper(Call underlyingCall) {
     this.underlyingCall = underlyingCall;

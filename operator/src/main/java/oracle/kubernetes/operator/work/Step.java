@@ -1,6 +1,5 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.work;
 
@@ -10,9 +9,10 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+
 import oracle.kubernetes.operator.work.Fiber.CompletionCallback;
 
-/** Individual step in a processing flow */
+/** Individual step in a processing flow. */
 public abstract class Step {
   private Step next;
 
@@ -38,8 +38,9 @@ public abstract class Step {
    */
   public static Step chain(Step... stepGroups) {
     int start = getFirstNonNullIndex(stepGroups);
-    if (start >= stepGroups.length)
+    if (start >= stepGroups.length) {
       throw new IllegalArgumentException("No non-Null steps specified");
+    }
 
     for (int i = start + 1; i < stepGroups.length; i++) {
       addLink(stepGroups[start], stepGroups[i]);
@@ -48,28 +49,63 @@ public abstract class Step {
   }
 
   private static int getFirstNonNullIndex(Step[] stepGroups) {
-    for (int i = 0; i < stepGroups.length; i++) if (stepGroups[i] != null) return i;
+    for (int i = 0; i < stepGroups.length; i++) {
+      if (stepGroups[i] != null) {
+        return i;
+      }
+    }
 
     return stepGroups.length;
   }
 
   private static void addLink(Step stepGroup1, Step stepGroup2) {
-    lastStep(stepGroup1).next = stepGroup2;
+    Step lastStep = lastStepIfNoDuplicate(stepGroup1, stepGroup2);
+    if (lastStep != null) {
+      // add steps in stepGroup2 to the end of stepGroup1 only if no steps
+      // appears in both groups to avoid introducing a loop
+      lastStep.next = stepGroup2;
+    }
   }
 
-  private static Step lastStep(Step stepGroup) {
-    Step s = stepGroup;
+  /**
+   * Return last step in stepGroup1, or null if any step appears in both step groups.
+   *
+   * @param stepGroup1 Step that we want to find the last step for
+   * @param stepGroup2 Step to check for duplicates
+   *
+   * @return last step in stepGroup1, or null if any step appears in both step groups.
+   */
+  private static Step lastStepIfNoDuplicate(Step stepGroup1, Step stepGroup2) {
+    Step s = stepGroup1;
+    List<Step> stepGroup2Array = stepToArray(stepGroup2);
     while (s.next != null) {
+      if (stepGroup2Array.contains(s.next)) {
+        return null;
+      }
       s = s.next;
     }
     return s;
   }
 
-  String getName() {
+  private static List<Step> stepToArray(Step stepGroup) {
+    ArrayList<Step> stepsArray = new ArrayList<>();
+    Step s = stepGroup;
+    while (s != null) {
+      stepsArray.add(s);
+      s = s.next;
+    }
+    return stepsArray;
+  }
+
+  /**
+   * The name of the step. This will default to the class name minus "Step".
+   * @return The name of the step
+   */
+  public String getName() {
     String name = getClass().getName();
     int idx = name.lastIndexOf('.');
     if (idx >= 0) {
-      name = name.substring(idx + 1, name.length());
+      name = name.substring(idx + 1);
     }
     name = name.endsWith("Step") ? name.substring(0, name.length() - 4) : name;
     String detail = getDetail();
@@ -78,6 +114,14 @@ public abstract class Step {
 
   protected String getDetail() {
     return null;
+  }
+
+  @Override
+  public String toString() {
+    if (next == null) {
+      return getName();
+    }
+    return getName() + "[" + next.toString() + "]";
   }
 
   /**
@@ -91,7 +135,7 @@ public abstract class Step {
 
   /**
    * Create {@link NextAction} that indicates that the next step be invoked with the given {@link
-   * Packet}
+   * Packet}.
    *
    * @param packet Packet to provide when invoking the next step
    * @return The next action
@@ -104,7 +148,7 @@ public abstract class Step {
 
   /**
    * Create {@link NextAction} that indicates that the indicated step be invoked with the given
-   * {@link Packet}
+   * {@link Packet}.
    *
    * @param step The step
    * @param packet Packet to provide when invoking the next step
@@ -117,7 +161,7 @@ public abstract class Step {
   }
 
   /**
-   * Returns next action that will end the fiber processing
+   * Returns next action that will end the fiber processing.
    *
    * @param packet Packet
    * @return Next action that will end processing
@@ -127,7 +171,7 @@ public abstract class Step {
   }
 
   /**
-   * Returns next action that will terminate fiber processing with a throwable
+   * Returns next action that will terminate fiber processing with a throwable.
    *
    * @param throwable Throwable
    * @param packet Packet
@@ -140,7 +184,7 @@ public abstract class Step {
   }
 
   /**
-   * Create {@link NextAction} that indicates the the current step be retried after a delay
+   * Create {@link NextAction} that indicates the the current step be retried after a delay.
    *
    * @param packet Packet to provide when retrying this step
    * @param delay Delay time
@@ -154,7 +198,7 @@ public abstract class Step {
   }
 
   /**
-   * Create {@link NextAction} that indicates the the current fiber resume with the next step after
+   * Create {@link NextAction} that indicates the the current fiber resume with the next step after.
    * a delay.
    *
    * @param packet Packet to provide when retrying this step
@@ -191,7 +235,7 @@ public abstract class Step {
    * @param onExit Called after fiber is suspended
    * @return Next action
    */
-  protected NextAction doSuspend(Consumer<Fiber> onExit) {
+  protected NextAction doSuspend(Consumer<AsyncFiber> onExit) {
     NextAction na = new NextAction();
     na.suspend(next, onExit);
     return na;
@@ -206,7 +250,7 @@ public abstract class Step {
    * @param onExit Called after fiber is suspended
    * @return Next action
    */
-  protected NextAction doSuspend(Step step, Consumer<Fiber> onExit) {
+  protected NextAction doSuspend(Step step, Consumer<AsyncFiber> onExit) {
     NextAction na = new NextAction();
     na.suspend(step, onExit);
     return na;
@@ -214,26 +258,6 @@ public abstract class Step {
 
   public Step getNext() {
     return next;
-  }
-
-  /** Multi-exception */
-  @SuppressWarnings("serial")
-  public static class MultiThrowable extends RuntimeException {
-    private final List<Throwable> throwables;
-
-    private MultiThrowable(List<Throwable> throwables) {
-      super(throwables.get(0));
-      this.throwables = throwables;
-    }
-
-    /**
-     * The multiple exceptions wrapped by this exception
-     *
-     * @return Multiple exceptions
-     */
-    public List<Throwable> getThrowables() {
-      return throwables;
-    }
   }
 
   /**
@@ -252,33 +276,16 @@ public abstract class Step {
         step,
         (fiber) -> {
           CompletionCallback callback =
-              new CompletionCallback() {
-                final AtomicInteger count = new AtomicInteger(startDetails.size());
-                final List<Throwable> throwables = new ArrayList<Throwable>();
-
+              new JoinCompletionCallback(fiber, packet, startDetails.size()) {
                 @Override
-                public void onCompletion(Packet packet) {
-                  if (count.decrementAndGet() == 0) {
+                public void onCompletion(Packet p) {
+                  int current = count.decrementAndGet();
+                  if (current == 0) {
                     // no need to synchronize throwables as all fibers are done
                     if (throwables.isEmpty()) {
                       fiber.resume(packet);
                     } else if (throwables.size() == 1) {
                       fiber.terminate(throwables.get(0), packet);
-                    } else {
-                      fiber.terminate(new MultiThrowable(throwables), packet);
-                    }
-                  }
-                }
-
-                @Override
-                public void onThrowable(Packet packet, Throwable throwable) {
-                  synchronized (throwables) {
-                    throwables.add(throwable);
-                  }
-                  if (count.decrementAndGet() == 0) {
-                    // no need to synchronize throwables as all fibers are done
-                    if (throwables.size() == 1) {
-                      fiber.terminate(throwable, packet);
                     } else {
                       fiber.terminate(new MultiThrowable(throwables), packet);
                     }
@@ -290,6 +297,92 @@ public abstract class Step {
             fiber.createChildFiber().start(sp.step, sp.packet, callback);
           }
         });
+  }
+
+  /**
+   * Create a {@link NextAction} that suspends the current {@link Fiber} and that starts child
+   * fibers for each step and packet pair. When at least one of the created child fibers completes,
+   * then this fiber is resumed with the indicated step and packet and any other child fibers are
+   * cancelled.
+   *
+   * @param step Step to invoke next when resumed after at least one child fiber completes
+   * @param packet Resume packet
+   * @param startDetails Pairs of step and packet to use when starting child fibers
+   * @return Next action
+   */
+  protected NextAction doForkAtLeastOne(
+      Step step, Packet packet, Collection<StepAndPacket> startDetails) {
+    return doSuspend(
+        step,
+        (fiber) -> {
+          Collection<Fiber> createdFibers = new ArrayList<>();
+          CompletionCallback callback =
+              new JoinCompletionCallback(fiber, packet, startDetails.size()) {
+                @Override
+                public void onCompletion(Packet p) {
+                  count.decrementAndGet();
+                  fiber.resume(packet);
+                  synchronized (createdFibers) {
+                    for (Fiber f : createdFibers) {
+                      f.cancel(true);
+                    }
+                  }
+                }
+              };
+          // start forked fibers
+          for (StepAndPacket sp : startDetails) {
+            fiber.createChildFiber().start(sp.step, sp.packet, callback);
+          }
+        });
+  }
+
+  /** Multi-exception. */
+  @SuppressWarnings("serial")
+  public static class MultiThrowable extends RuntimeException {
+    private final List<Throwable> throwables;
+
+    private MultiThrowable(List<Throwable> throwables) {
+      super(throwables.get(0));
+      this.throwables = throwables;
+    }
+
+    /**
+     * The multiple exceptions wrapped by this exception.
+     *
+     * @return Multiple exceptions
+     */
+    public List<Throwable> getThrowables() {
+      return throwables;
+    }
+  }
+
+  private abstract static class JoinCompletionCallback implements CompletionCallback {
+    protected final AsyncFiber fiber;
+    protected final Packet packet;
+    protected final AtomicInteger count;
+    protected final List<Throwable> throwables = new ArrayList<Throwable>();
+
+    JoinCompletionCallback(AsyncFiber fiber, Packet packet, int initialCount) {
+      this.fiber = fiber;
+      this.packet = packet;
+      this.count = new AtomicInteger(initialCount);
+    }
+
+    @Override
+    public void onThrowable(Packet p, Throwable throwable) {
+      synchronized (throwables) {
+        throwables.add(throwable);
+      }
+      int current = count.decrementAndGet();
+      if (current == 0) {
+        // no need to synchronize throwables as all fibers are done
+        if (throwables.size() == 1) {
+          fiber.terminate(throwable, packet);
+        } else {
+          fiber.terminate(new MultiThrowable(throwables), packet);
+        }
+      }
+    }
   }
 
   public static class StepAndPacket {

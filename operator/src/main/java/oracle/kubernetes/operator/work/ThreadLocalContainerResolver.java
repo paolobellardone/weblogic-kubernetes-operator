@@ -1,6 +1,5 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.work;
 
@@ -15,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
 import oracle.kubernetes.operator.logging.MessageKeys;
@@ -40,7 +40,7 @@ import oracle.kubernetes.operator.logging.MessageKeys;
 public class ThreadLocalContainerResolver extends ContainerResolver {
   private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
 
-  private ThreadLocal<Container> containerThreadLocal =
+  private final ThreadLocal<Container> containerThreadLocal =
       new ThreadLocal<Container>() {
         @Override
         protected Container initialValue() {
@@ -53,7 +53,7 @@ public class ThreadLocalContainerResolver extends ContainerResolver {
   }
 
   /**
-   * Enters container
+   * Enters container.
    *
    * @param container Container to set
    * @return Previous container; must be remembered and passed to exitContainer
@@ -65,7 +65,7 @@ public class ThreadLocalContainerResolver extends ContainerResolver {
   }
 
   /**
-   * Exits container
+   * Exits container.
    *
    * @param old Container returned from enterContainer
    */

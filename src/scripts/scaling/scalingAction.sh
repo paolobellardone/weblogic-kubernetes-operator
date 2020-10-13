@@ -1,6 +1,6 @@
-#!/bin/sh
-# Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+#!/bin/bash
+# Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 echo "called scalingAction.sh" >> scalingAction.log
 
@@ -14,7 +14,7 @@ operator_namespace="weblogic-operator"
 operator_service_account="weblogic-operator"
 scaling_size=1
 access_token=""
-kubernetes_master="https://kubernetes"
+kubernetes_master="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"
 
 # Parse arguments/parameters
 for arg in "$@"
@@ -69,12 +69,12 @@ done
 # Verify required parameters
 if [ -z "$scaling_action" ] || [ -z "$wls_domain_uid" ] || [ -z "$wls_cluster_name" ]
 then
-    echo "Usage: scalingAction.sh --action=[scaleUp | scaleDown] --domain_uid=<domain uid> --cluster_name=<cluster name> [--kubernetes_master=https://kubernetes] [--access_token=<access_token>] [--wls_domain_namespace=default] [--operator_namespace=weblogic-operator] [--operator_service_name=weblogic-operator] [--scaling_size=1]"
+    echo "Usage: scalingAction.sh --action=[scaleUp | scaleDown] --domain_uid=<domain uid> --cluster_name=<cluster name> [--kubernetes_master=https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}] [--access_token=<access_token>] [--wls_domain_namespace=default] [--operator_namespace=weblogic-operator] [--operator_service_name=weblogic-operator] [--scaling_size=1]"
     echo "  where"
     echo "    action - scaleUp or scaleDown"
     echo "    domain_uid - WebLogic Domain Unique Identifier"
     echo "    cluster_name - WebLogic Cluster Name"
-    echo "    kubernetes_master - Kubernetes master URL, default=https://kubernetes"
+    echo "    kubernetes_master - Kubernetes master URL, default=https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"
     echo "    access_token - Service Account Bearer token for authentication and authorization for access to REST Resources"
     echo "    wls_domain_namespace - Kubernetes name space WebLogic Domain is defined in, default=default"
     echo "    operator_service_name - WebLogic Operator Service name, default=internal-weblogic-operator-svc"
@@ -117,8 +117,25 @@ INPUT
 port=`echo ${STATUS} | python cmds.py`
 echo "port: $port" >> scalingAction.log
 
+# Retrieve Custom Resource Definition for WebLogic domain
+CRD=`curl -v --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" -X GET $kubernetes_master/apis/apiextensions.k8s.io/v1beta1/customresourcedefinitions/domains.weblogic.oracle`
+if [ $? -ne 0 ]
+  then
+    echo "Failed to retrieve Custom Resource Definition for WebLogic domain" >> scalingAction.log
+    echo "CRD: $CRD" >> scalingAction.log
+    exit 1
+fi
+
+# Find domain version
+cat > cmds.py << INPUT
+import sys, json
+print(json.load(sys.stdin)["spec"]["version"])
+INPUT
+domain_api_version=`echo ${CRD} | python cmds.py`
+echo "domain_api_version: $domain_api_version" >> scalingAction.log
+
 # Reteive Custom Resource Domain 
-DOMAIN=`curl -v --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" $kubernetes_master/apis/weblogic.oracle/v2/namespaces/$wls_domain_namespace/domains/$domain_uid`
+DOMAIN=`curl -v --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" $kubernetes_master/apis/weblogic.oracle/$domain_api_version/namespaces/$wls_domain_namespace/domains/$domain_uid`
 if [ $? -ne 0 ]
   then
     echo "Failed to retrieve WebLogic Domain Custom Resource Definition" >> scalingAction.log

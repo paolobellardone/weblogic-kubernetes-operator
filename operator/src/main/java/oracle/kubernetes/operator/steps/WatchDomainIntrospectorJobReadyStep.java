@@ -1,45 +1,31 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.steps;
 
-import io.kubernetes.client.models.V1Job;
-import java.util.concurrent.atomic.AtomicBoolean;
+import io.kubernetes.client.openapi.models.V1Job;
 import oracle.kubernetes.operator.JobWatcher;
 import oracle.kubernetes.operator.ProcessingConstants;
-import oracle.kubernetes.operator.TuningParameters.WatchTuning;
 import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
 import oracle.kubernetes.operator.work.NextAction;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
-import oracle.kubernetes.operator.work.ThreadFactorySingleton;
 
 public class WatchDomainIntrospectorJobReadyStep extends Step {
-  private final WatchTuning tuning;
 
-  public WatchDomainIntrospectorJobReadyStep(WatchTuning tuning, Step next) {
+  public WatchDomainIntrospectorJobReadyStep(Step next) {
     super(next);
-    this.tuning = tuning;
   }
 
   @Override
   public NextAction apply(Packet packet) {
-    DomainPresenceInfo info = packet.getSPI(DomainPresenceInfo.class);
-    String namespace = info.getNamespace();
-    String initialResourceVersion = info.getDomain().getMetadata().getResourceVersion();
+    DomainPresenceInfo info = packet.getSpi(DomainPresenceInfo.class);
 
     V1Job domainIntrospectorJob = (V1Job) packet.get(ProcessingConstants.DOMAIN_INTROSPECTOR_JOB);
 
     // No need to spawn a watcher if the job is already complete
     if (domainIntrospectorJob != null && !JobWatcher.isComplete(domainIntrospectorJob)) {
-      JobWatcher jw =
-          JobWatcher.create(
-              ThreadFactorySingleton.getInstance(),
-              namespace,
-              initialResourceVersion,
-              tuning,
-              new AtomicBoolean(false));
+      JobWatcher jw = JobWatcher.getOrCreateFor(info.getDomain());
 
       return doNext(jw.waitForReady(domainIntrospectorJob, getNext()), packet);
     }

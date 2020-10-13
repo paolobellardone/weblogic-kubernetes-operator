@@ -1,25 +1,24 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helpers;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Map;
+
+import oracle.kubernetes.operator.utils.InMemoryFileSystem;
+import org.junit.Test;
 
 import static oracle.kubernetes.operator.helpers.ConfigMapHelperTest.SCRIPT_NAMES;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasEntry;
 import static org.hamcrest.junit.MatcherAssert.assertThat;
 
-import java.io.IOException;
-import java.nio.file.FileSystem;
-import java.nio.file.Path;
-import java.util.Map;
-import oracle.kubernetes.operator.utils.InMemoryFileSystem;
-import org.junit.Test;
-
 public class FileGroupReaderTest {
 
+  private static InMemoryFileSystem fileSystem = InMemoryFileSystem.createInstance();
   private final FileGroupReader scriptReader = ConfigMapHelper.getScriptReader();
-  private static FileSystem fileSystem = InMemoryFileSystem.getInstance();
 
   @Test
   public void afterLoadScriptsFromClasspath_haveScriptNamesAsKeys() {
@@ -29,8 +28,8 @@ public class FileGroupReaderTest {
 
   @Test
   public void loadFilesFromMemory() throws IOException {
-    InMemoryFileSystem.defineFile("group/a.b", "1234");
-    InMemoryFileSystem.defineFile("group/x/c.d", "5678");
+    fileSystem.defineFile("group/a.b", "1234");
+    fileSystem.defineFile("group/x/c.d", "5678");
 
     Path p = fileSystem.getPath("group");
     Map<String, String> map = FileGroupReader.loadContents(p);

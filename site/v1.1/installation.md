@@ -1,4 +1,4 @@
-> **WARNING** This documentation is for version 1.1 of the operator.  To view documenation for the current release, [please click here](/site).
+> **WARNING** This documentation is for version 1.1 of the operator.  To view documentation for the current release, [please click here](/site).
 
 # Installation
 
@@ -137,7 +137,7 @@ The operator provides some optional features that can be enabled in the configur
 
 ### Load balancing with an Ingress controller or a web server
 
-You can choose a load balancer provider for your WebLogic domains running in a Kubernetes cluster. Please refer to [Load balancing with Voyager/HAProxy](voyager.md), [Load balancing with Traefik](raefik.md), and [Load balancing with the Apache HTTP Server](apache.md) for information about the current capabilities and setup instructions for each of the supported load balancers.
+You can choose a load balancer provider for your WebLogic domains running in a Kubernetes cluster. Please refer to [Load balancing with Voyager/HAProxy](voyager.md), [Load balancing with Traefik](traefik.md), and [Load balancing with the Apache HTTP Server](apache.md) for information about the current capabilities and setup instructions for each of the supported load balancers.
 
 Note these limitations:
 
@@ -187,8 +187,8 @@ The script will validate each action before it proceeds.
 The script will create a YAML file called `weblogic-operator.yaml`.  An example of this file is shown below.  This file can be kept for later use.  Developers or advanced users may wish to hand edit this file.
 
 ```
-# Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 #
 #  This is a template YAML file to deploy the Kubernetes Operator for WebLogic.

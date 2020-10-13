@@ -1,23 +1,30 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helpers;
 
-import io.kubernetes.client.models.V1DeleteOptions;
-import io.kubernetes.client.models.V1EnvVar;
-import io.kubernetes.client.models.V1Job;
-import io.kubernetes.client.models.V1Pod;
-import io.kubernetes.client.models.V1PodList;
-import io.kubernetes.client.models.V1Volume;
-import io.kubernetes.client.models.V1VolumeMount;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+
+import io.kubernetes.client.openapi.models.V1DeleteOptions;
+import io.kubernetes.client.openapi.models.V1EnvVar;
+import io.kubernetes.client.openapi.models.V1Job;
+import io.kubernetes.client.openapi.models.V1JobCondition;
+import io.kubernetes.client.openapi.models.V1JobStatus;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.openapi.models.V1PodList;
+import io.kubernetes.client.openapi.models.V1Volume;
+import io.kubernetes.client.openapi.models.V1VolumeMount;
+import oracle.kubernetes.operator.DomainStatusUpdater;
+import oracle.kubernetes.operator.IntrospectorConfigMapKeys;
 import oracle.kubernetes.operator.JobWatcher;
 import oracle.kubernetes.operator.LabelConstants;
+import oracle.kubernetes.operator.MakeRightDomainOperation;
 import oracle.kubernetes.operator.ProcessingConstants;
 import oracle.kubernetes.operator.TuningParameters;
-import oracle.kubernetes.operator.TuningParameters.WatchTuning;
 import oracle.kubernetes.operator.calls.CallResponse;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
@@ -29,30 +36,185 @@ import oracle.kubernetes.operator.wlsconfig.WlsDomainConfig;
 import oracle.kubernetes.operator.work.NextAction;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
-import oracle.kubernetes.weblogic.domain.v2.Cluster;
-import oracle.kubernetes.weblogic.domain.v2.ConfigurationConstants;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
-import oracle.kubernetes.weblogic.domain.v2.DomainSpec;
-import oracle.kubernetes.weblogic.domain.v2.ManagedServer;
+import oracle.kubernetes.weblogic.domain.model.Cluster;
+import oracle.kubernetes.weblogic.domain.model.ConfigurationConstants;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.DomainSpec;
+import oracle.kubernetes.weblogic.domain.model.IntrospectorJobEnvVars;
+import oracle.kubernetes.weblogic.domain.model.ManagedServer;
+import oracle.kubernetes.weblogic.domain.model.ServerEnvVars;
+
+import static oracle.kubernetes.operator.DomainSourceType.FromModel;
+import static oracle.kubernetes.operator.DomainStatusUpdater.INSPECTING_DOMAIN_PROGRESS_REASON;
+import static oracle.kubernetes.operator.DomainStatusUpdater.createProgressingStep;
+import static oracle.kubernetes.operator.logging.MessageKeys.INTROSPECTOR_JOB_FAILED;
+import static oracle.kubernetes.operator.logging.MessageKeys.INTROSPECTOR_JOB_FAILED_DETAIL;
 
 public class JobHelper {
 
   static final String START_TIME = "WlsRetriever-startTime";
   private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
+  static final String INTROSPECTOR_LOG_PREFIX = "Introspector Job Log: ";
+  private static final String EOL_PATTERN = "\\r?\\n";
 
-  private JobHelper() {}
+  private JobHelper() {
+  }
 
-  static String createJobName(String domainUID) {
-    return LegalNames.toJobIntrospectorName(domainUID);
+  static String createJobName(String domainUid) {
+    return LegalNames.toJobIntrospectorName(domainUid);
+  }
+
+  /**
+   * Factory for {@link Step} that creates WebLogic domain introspector job.
+   * Uses the following packet values:
+   *  ProcessingConstants.DOMAIN_TOPOLOGY - the domain topology
+   *  ProcessingConstants.DOMAIN_RESTART_VERSION - the restart version from the domain
+   *  ProcessingConstants.DOMAIN_INPUTS_HASH
+   *  ProcessingConstants.DOMAIN_INTROSPECT_VERSION - the introspect version from the old domain spec
+   *
+   * @param next Next processing step
+   * @return Step for creating job
+   */
+  public static Step createDomainIntrospectorJobStep(Step next) {
+
+    return new DomainIntrospectorJobStep(next);
+  }
+
+  private static boolean runIntrospector(Packet packet, DomainPresenceInfo info) {
+    WlsDomainConfig topology = (WlsDomainConfig) packet.get(ProcessingConstants.DOMAIN_TOPOLOGY);
+    LOGGER.fine("runIntrospector topology: " + topology);
+    LOGGER.fine("runningServersCount: " + runningServersCount(info));
+    LOGGER.fine("creatingServers: " + creatingServers(info));
+    return topology == null
+          || isBringingUpNewDomain(info)
+          || introspectionRequested(packet)
+          || isModelInImageUpdate(packet, info);
+  }
+
+  private static boolean isBringingUpNewDomain(DomainPresenceInfo info) {
+    return runningServersCount(info) == 0 && creatingServers(info);
+  }
+
+  private static boolean introspectionRequested(Packet packet) {
+    return packet.containsKey(ProcessingConstants.DOMAIN_INTROSPECT_REQUESTED);
+  }
+
+  private static boolean isModelInImageUpdate(Packet packet, DomainPresenceInfo info) {
+    return isModelInImage(info) && !getCurrentImageSpecHash(info).equals(getIntrospectionImageSpecHash(packet));
+  }
+
+  private static boolean isModelInImage(DomainPresenceInfo info) {
+    return info.getDomain().getDomainHomeSourceType() == FromModel;
+  }
+
+  private static String getCurrentImageSpecHash(DomainPresenceInfo info) {
+    return String.valueOf(ConfigMapHelper.getModelInImageSpecHash(info.getDomain().getSpec().getImage()));
+  }
+
+  private static String getIntrospectionImageSpecHash(Packet packet) {
+    return (String) packet.get(IntrospectorConfigMapKeys.DOMAIN_INPUTS_HASH);
+  }
+
+  private static int runningServersCount(DomainPresenceInfo info) {
+    return ManagedServersUpStep.getRunningServers(info).size();
+  }
+
+  /**
+   * TODO: Enhance determination of when we believe we're creating WLS managed server pods.
+   *
+   * @param info the domain presence info
+   * @return True, if creating servers
+   */
+  static boolean creatingServers(DomainPresenceInfo info) {
+    Domain dom = info.getDomain();
+    DomainSpec spec = dom.getSpec();
+    List<Cluster> clusters = spec.getClusters();
+    List<ManagedServer> servers = spec.getManagedServers();
+
+    // Are we starting a cluster?
+    // NOTE: clusterServerStartPolicy == null indicates default policy
+    for (Cluster cluster : clusters) {
+      int replicaCount = dom.getReplicaCount(cluster.getClusterName());
+      String clusterServerStartPolicy = cluster.getServerStartPolicy();
+      LOGGER.fine(
+            "Start Policy: "
+                  + clusterServerStartPolicy
+                  + ", replicaCount: "
+                  + replicaCount
+                  + " for cluster: "
+                  + cluster);
+      if ((clusterServerStartPolicy == null
+            || !clusterServerStartPolicy.equals(ConfigurationConstants.START_NEVER))
+            && replicaCount > 0) {
+        return true;
+      }
+    }
+
+    // If Domain level Server Start Policy = ALWAYS, IF_NEEDED or ADMIN_ONLY then we most likely
+    // will start a server pod
+    // NOTE: domainServerStartPolicy == null indicates default policy
+    String domainServerStartPolicy = dom.getSpec().getServerStartPolicy();
+    if (domainServerStartPolicy == null
+          || !domainServerStartPolicy.equals(ConfigurationConstants.START_NEVER)) {
+      return true;
+    }
+
+    // Are we starting any explicitly specified individual server?
+    // NOTE: serverStartPolicy == null indicates default policy
+    for (ManagedServer server : servers) {
+      String serverStartPolicy = server.getServerStartPolicy();
+      if (serverStartPolicy == null
+            || !serverStartPolicy.equals(ConfigurationConstants.START_NEVER)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Factory for {@link Step} that deletes WebLogic domain introspector job.
+   *
+   * @param next Next processing step
+   * @return Step for deleting the domain introsepctor jod
+   */
+  public static Step deleteDomainIntrospectorJobStep(Step next) {
+    return new DeleteIntrospectorJobStep(next);
+  }
+
+  private static Step createWatchDomainIntrospectorJobReadyStep(Step next) {
+    return new WatchDomainIntrospectorJobReadyStep(next);
+  }
+
+  /**
+   * Factory for {@link Step} that reads WebLogic domain introspector job results from pod's log.
+   *
+   * @param next Next processing step
+   * @return Step for reading WebLogic domain introspector pod log
+   */
+  private static Step readDomainIntrospectorPodLogStep(Step next) {
+    return createWatchDomainIntrospectorJobReadyStep(
+          readDomainIntrospectorPodStep(readDomainIntrospectorPodLog(next)));
+  }
+
+  /**
+   * Factory for {@link Step} that reads WebLogic domain introspector pod.
+   *
+   * @param next Next processing step
+   * @return Step for reading WebLogic domain introspector pod
+   */
+  private static Step readDomainIntrospectorPodStep(Step next) {
+    return new ReadDomainIntrospectorPodStep(next);
   }
 
   static class DomainIntrospectorJobStepContext extends JobStepContext {
-    private final DomainPresenceInfo info;
 
-    DomainIntrospectorJobStepContext(DomainPresenceInfo info, Packet packet) {
+    // domainTopology is null if this is 1st time we're running job for this domain
+    private final WlsDomainConfig domainTopology;
+
+    DomainIntrospectorJobStepContext(Packet packet) {
       super(packet);
-      this.info = info;
-
+      this.domainTopology = (WlsDomainConfig) packet.get(ProcessingConstants.DOMAIN_TOPOLOGY);
       init();
     }
 
@@ -74,11 +236,7 @@ public class JobHelper {
 
     @Override
     String getJobName() {
-      return LegalNames.toJobIntrospectorName(getDomainUID());
-    }
-
-    Domain getDomain() {
-      return info.getDomain();
+      return LegalNames.toJobIntrospectorName(getDomainUid());
     }
 
     @Override
@@ -91,195 +249,156 @@ public class JobHelper {
       return getDomain().getSpec().getAdditionalVolumeMounts();
     }
 
-    @Override
-    List<V1EnvVar> getEnvironmentVariables(TuningParameters tuningParameters) {
-      List<V1EnvVar> envVarList = new ArrayList<V1EnvVar>();
-      addEnvVar(envVarList, "NAMESPACE", getNamespace());
-      addEnvVar(envVarList, "DOMAIN_UID", getDomainUID());
-      addEnvVar(envVarList, "DOMAIN_HOME", getDomainHome());
-      addEnvVar(envVarList, "NODEMGR_HOME", getNodeManagerHome());
-      addEnvVar(envVarList, "LOG_HOME", getEffectiveLogHome());
-      addEnvVar(envVarList, "INTROSPECT_HOME", getIntrospectHome());
-      addEnvVar(envVarList, "SERVER_OUT_IN_POD_LOG", getIncludeServerOutInPodLog());
-      addEnvVar(envVarList, "CREDENTIALS_SECRET_NAME", getWebLogicCredentialsSecretName());
-
-      return envVarList;
+    private String getAsName() {
+      return domainTopology.getAdminServerName();
     }
-  }
 
-  /**
-   * Factory for {@link Step} that creates WebLogic domain introspector job
-   *
-   * @param tuning Watch tuning parameters
-   * @param next Next processing step
-   * @return Step for creating job
-   */
-  public static Step createDomainIntrospectorJobStep(WatchTuning tuning, Step next) {
+    private Integer getAsPort() {
+      return domainTopology
+          .getServerConfig(getAsName())
+          .getLocalAdminProtocolChannelPort();
+    }
 
-    // return new DomainIntrospectorJobStep(
-    //    readDomainIntrospectorPodLogStep(ConfigMapHelper.createSitConfigMapStep(next)));
-    return new DomainIntrospectorJobStep(tuning, next);
+    private boolean isLocalAdminProtocolChannelSecure() {
+      return domainTopology
+          .getServerConfig(getAsName())
+          .isLocalAdminProtocolChannelSecure();
+    }
+
+    private String getAsServiceName() {
+      return LegalNames.toServerServiceName(getDomainUid(), getAsName());
+    }
+
+    @Override
+    List<V1EnvVar> getConfiguredEnvVars(TuningParameters tuningParameters) {
+      // Pod for introspector job would use same environment variables as for admin server
+      List<V1EnvVar> vars =
+            PodHelper.createCopy(getDomain().getAdminServerSpec().getEnvironmentVariables());
+
+      addEnvVar(vars, ServerEnvVars.DOMAIN_UID, getDomainUid());
+      addEnvVar(vars, ServerEnvVars.DOMAIN_HOME, getDomainHome());
+      addEnvVar(vars, ServerEnvVars.NODEMGR_HOME, getNodeManagerHome());
+      addEnvVar(vars, ServerEnvVars.LOG_HOME, getEffectiveLogHome());
+      addEnvVar(vars, ServerEnvVars.SERVER_OUT_IN_POD_LOG, getIncludeServerOutInPodLog());
+      addEnvVar(vars, ServerEnvVars.ACCESS_LOG_IN_LOG_HOME, getHttpAccessLogInLogHome());
+      addEnvVar(vars, IntrospectorJobEnvVars.NAMESPACE, getNamespace());
+      addEnvVar(vars, IntrospectorJobEnvVars.INTROSPECT_HOME, getIntrospectHome());
+      addEnvVar(vars, IntrospectorJobEnvVars.CREDENTIALS_SECRET_NAME, getWebLogicCredentialsSecretName());
+      addEnvVar(vars, IntrospectorJobEnvVars.OPSS_KEY_SECRET_NAME, getOpssWalletPasswordSecretName());
+      addEnvVar(vars, IntrospectorJobEnvVars.OPSS_WALLETFILE_SECRET_NAME, getOpssWalletFileSecretName());
+      addEnvVar(vars, IntrospectorJobEnvVars.RUNTIME_ENCRYPTION_SECRET_NAME, getRuntimeEncryptionSecretName());
+      addEnvVar(vars, IntrospectorJobEnvVars.WDT_DOMAIN_TYPE, getWdtDomainType());
+      addEnvVar(vars, IntrospectorJobEnvVars.DOMAIN_SOURCE_TYPE, getDomainHomeSourceType().toString());
+      addEnvVar(vars, IntrospectorJobEnvVars.ISTIO_ENABLED, Boolean.toString(isIstioEnabled()));
+      addEnvVar(vars, IntrospectorJobEnvVars.ISTIO_READINESS_PORT, Integer.toString(getIstioReadinessPort()));
+      addEnvVar(vars, IntrospectorJobEnvVars.ISTIO_POD_NAMESPACE, getNamespace());
+
+      String dataHome = getDataHome();
+      if (dataHome != null && !dataHome.isEmpty()) {
+        addEnvVar(vars, ServerEnvVars.DATA_HOME, dataHome);
+      }
+
+      // Populate env var list used by the MII introspector job's 'short circuit' MD5
+      // check. To prevent a false trip of the circuit breaker, the list must be the
+      // same regardless of whether domainTopology == null.
+      StringBuffer sb = new StringBuffer(vars.size() * 32);
+      for (V1EnvVar var : vars) {
+        sb.append(var.getName()).append(',');
+      }
+      sb.deleteCharAt(sb.length() - 1);
+      addEnvVar(vars, "OPERATOR_ENVVAR_NAMES", sb.toString());
+
+      if (domainTopology != null) {
+        // The domainTopology != null when the job is rerun for the same domain. In which
+        // case we should now know how to contact the admin server, the admin server may
+        // already be running, and the job may want to contact the admin server.
+
+        addEnvVar(vars, "ADMIN_NAME", getAsName());
+        addEnvVar(vars, "ADMIN_PORT", getAsPort().toString());
+        if (isLocalAdminProtocolChannelSecure()) {
+          addEnvVar(vars, "ADMIN_PORT_SECURE", "true");
+        }
+        addEnvVar(vars, "AS_SERVICE_NAME", getAsServiceName());
+      }
+
+      return vars;
+    }
   }
 
   static class DomainIntrospectorJobStep extends Step {
-    private final WatchTuning tuning;
 
-    public DomainIntrospectorJobStep(WatchTuning tuning, Step next) {
+    DomainIntrospectorJobStep(Step next) {
       super(next);
-      this.tuning = tuning;
     }
 
     @Override
     public NextAction apply(Packet packet) {
-      DomainPresenceInfo info = packet.getSPI(DomainPresenceInfo.class);
+      DomainPresenceInfo info = packet.getSpi(DomainPresenceInfo.class);
       if (runIntrospector(packet, info)) {
-        JobStepContext context = new DomainIntrospectorJobStepContext(info, packet);
+        JobStepContext context = new DomainIntrospectorJobStepContext(packet);
 
-        packet.putIfAbsent(START_TIME, Long.valueOf(System.currentTimeMillis()));
+        packet.putIfAbsent(START_TIME, System.currentTimeMillis());
 
         return doNext(
-            context.createNewJob(
-                readDomainIntrospectorPodLogStep(
-                    tuning, ConfigMapHelper.createSitConfigMapStep(getNext()))),
-            packet);
+            Step.chain(
+                createProgressingStep(info, INSPECTING_DOMAIN_PROGRESS_REASON, true, null),
+                context.createNewJob(null),
+                readDomainIntrospectorPodLogStep(null),
+                deleteDomainIntrospectorJobStep(null),
+                ConfigMapHelper.createIntrospectorConfigMapStep(getNext())),
+              packet);
       }
 
-      return doNext(getNext(), packet);
+      return doNext(DomainValidationSteps.createValidateDomainTopologyStep(getNext()), packet);
     }
-  }
-
-  private static boolean runIntrospector(Packet packet, DomainPresenceInfo info) {
-    WlsDomainConfig config = (WlsDomainConfig) packet.get(ProcessingConstants.DOMAIN_TOPOLOGY);
-    LOGGER.fine("runIntrospector topology: " + config);
-    LOGGER.fine("runningServersCount: " + runningServersCount(info));
-    LOGGER.fine("creatingServers: " + creatingServers(info));
-    if (config == null || (runningServersCount(info) == 0 && creatingServers(info))) {
-      return true;
-    }
-    return false;
-  }
-
-  private static int runningServersCount(DomainPresenceInfo info) {
-    return ManagedServersUpStep.getRunningServers(info).size();
-  }
-
-  /**
-   * TODO: Enhance determination of when we believe we're creating WLS managed server pods
-   *
-   * @param info
-   * @return
-   */
-  private static boolean creatingServers(DomainPresenceInfo info) {
-    Domain dom = info.getDomain();
-    DomainSpec spec = dom.getSpec();
-    List<Cluster> clusters = spec.getClusters();
-    List<ManagedServer> servers = spec.getManagedServers();
-
-    // Are we starting a cluster?
-    // NOTE: clusterServerStartPolicy == null indicates default policy
-    for (Cluster cluster : clusters) {
-      int replicaCount = cluster.getReplicas();
-      String clusterServerStartPolicy = cluster.getServerStartPolicy();
-      LOGGER.fine(
-          "Start Policy: "
-              + clusterServerStartPolicy
-              + ", replicaCount: "
-              + replicaCount
-              + " for cluster: "
-              + cluster);
-      if ((clusterServerStartPolicy == null
-              || !clusterServerStartPolicy.equals(ConfigurationConstants.START_NEVER))
-          && replicaCount > 0) {
-        return true;
-      }
-    }
-
-    // If Domain level Server Start Policy = ALWAYS, IF_NEEDED or ADMIN_ONLY then we most likely
-    // will start a server pod
-    // NOTE: domainServerStartPolicy == null indicates default policy
-    String domainServerStartPolicy = dom.getSpec().getServerStartPolicy();
-    if (domainServerStartPolicy == null
-        || !domainServerStartPolicy.equals(ConfigurationConstants.START_NEVER)) {
-      return true;
-    }
-
-    // Are we starting any explicitly specified individual server?
-    // NOTE: serverStartPolicy == null indicates default policy
-    for (ManagedServer server : servers) {
-      String serverStartPolicy = server.getServerStartPolicy();
-      if (serverStartPolicy == null
-          || !serverStartPolicy.equals(ConfigurationConstants.START_NEVER)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Factory for {@link Step} that deletes WebLogic domain introspector job
-   *
-   * @param domainUID The unique identifier assigned to the Weblogic domain when it was registered
-   * @param namespace Namespace
-   * @param next Next processing step
-   * @return Step for deleting the domain introsepctor jod
-   */
-  public static Step deleteDomainIntrospectorJobStep(
-      String domainUID, String namespace, Step next) {
-    return new DeleteIntrospectorJobStep(domainUID, namespace, next);
   }
 
   private static class DeleteIntrospectorJobStep extends Step {
-    private String domainUID;
-    private String namespace;
 
-    DeleteIntrospectorJobStep(String domainUID, String namespace, Step next) {
+    DeleteIntrospectorJobStep(Step next) {
       super(next);
-      this.domainUID = domainUID;
-      this.namespace = namespace;
     }
 
     @Override
     public NextAction apply(Packet packet) {
-      return doNext(deleteJob(getNext()), packet);
+      return doNext(deleteJob(packet, getNext()), packet);
     }
 
     String getJobDeletedMessageKey() {
       return MessageKeys.JOB_DELETED;
     }
 
-    protected void logJobDeleted(String domainUID, String namespace, String jobName) {
-      LOGGER.info(getJobDeletedMessageKey(), domainUID, namespace, jobName);
+    void logJobDeleted(String domainUid, String namespace, String jobName, Packet packet) {
+      V1Job domainIntrospectorJob =
+          (V1Job) packet.remove(ProcessingConstants.DOMAIN_INTROSPECTOR_JOB);
+
+      packet.remove(ProcessingConstants.INTROSPECTOR_JOB_FAILURE_LOGGED);
+      if (domainIntrospectorJob != null
+          && !JobWatcher.isComplete(domainIntrospectorJob)) {
+        logIntrospectorFailure(packet, domainIntrospectorJob);
+      }
+      packet.remove(ProcessingConstants.JOB_POD_NAME);
+
+      LOGGER.fine(getJobDeletedMessageKey(), domainUid, namespace, jobName);
     }
 
-    private Step deleteJob(Step next) {
-      String jobName = JobHelper.createJobName(this.domainUID);
-      logJobDeleted(this.domainUID, namespace, jobName);
-      Step step =
-          new CallBuilder()
-              .deleteJobAsync(
+    private Step deleteJob(Packet packet, Step next) {
+      DomainPresenceInfo info = packet.getSpi(DomainPresenceInfo.class);
+      java.lang.String domainUid = info.getDomain().getDomainUid();
+      java.lang.String namespace = info.getNamespace();
+      String jobName = JobHelper.createJobName(domainUid);
+      logJobDeleted(domainUid, namespace, jobName, packet);
+      return new CallBuilder()
+            .deleteJobAsync(
                   jobName,
-                  this.namespace,
+                  namespace,
                   new V1DeleteOptions().propagationPolicy("Foreground"),
                   new DefaultResponseStep<>(next));
-      return step;
     }
   }
 
-  private static Step createWatchDomainIntrospectorJobReadyStep(WatchTuning tuning, Step next) {
-    return new WatchDomainIntrospectorJobReadyStep(tuning, next);
-  }
-
-  /**
-   * Factory for {@link Step} that reads WebLogic domain introspector job results from pod's log
-   *
-   * @param tuning Watch tuning parameters
-   * @param next Next processing step
-   * @return Step for reading WebLogic domain introspector pod log
-   */
-  public static Step readDomainIntrospectorPodLogStep(WatchTuning tuning, Step next) {
-    return createWatchDomainIntrospectorJobReadyStep(
-        tuning, readDomainIntrospectorPodStep(new ReadDomainIntrospectorPodLogStep(next)));
+  static ReadDomainIntrospectorPodLogStep readDomainIntrospectorPodLog(Step next) {
+    return new ReadDomainIntrospectorPodLogStep(next);
   }
 
   private static class ReadDomainIntrospectorPodLogStep extends Step {
@@ -290,7 +409,7 @@ public class JobHelper {
 
     @Override
     public NextAction apply(Packet packet) {
-      DomainPresenceInfo info = packet.getSPI(DomainPresenceInfo.class);
+      DomainPresenceInfo info = packet.getSpi(DomainPresenceInfo.class);
       String namespace = info.getNamespace();
 
       String jobPodName = (String) packet.get(ProcessingConstants.JOB_POD_NAME);
@@ -299,66 +418,154 @@ public class JobHelper {
     }
 
     private Step readDomainIntrospectorPodLog(String jobPodName, String namespace, Step next) {
-      Step step =
-          new CallBuilder()
-              .readPodLogAsync(
+      return new CallBuilder()
+            .readPodLogAsync(
                   jobPodName, namespace, new ReadDomainIntrospectorPodLogResponseStep(next));
-      return step;
     }
   }
 
   private static class ReadDomainIntrospectorPodLogResponseStep extends ResponseStep<String> {
-    public ReadDomainIntrospectorPodLogResponseStep(Step nextStep) {
-      super(nextStep);
-    }
+    private StringBuilder logMessage = new StringBuilder();
+    private final List<String> severeStatuses = new ArrayList<>();
 
-    @Override
-    public NextAction onFailure(Packet packet, CallResponse<String> callResponse) {
-      cleanupJobArtifacts(packet);
-      return super.onFailure(packet, callResponse);
+    ReadDomainIntrospectorPodLogResponseStep(Step nextStep) {
+      super(nextStep);
     }
 
     @Override
     public NextAction onSuccess(Packet packet, CallResponse<String> callResponse) {
       String result = callResponse.getResult();
-
-      // Log output to Operator log
       LOGGER.fine("+++++ ReadDomainIntrospectorPodLogResponseStep: \n" + result);
 
-      V1Job domainIntrospectorJob = (V1Job) packet.get(ProcessingConstants.DOMAIN_INTROSPECTOR_JOB);
-      if (domainIntrospectorJob != null && JobWatcher.isComplete(domainIntrospectorJob)) {
-        if (result != null) {
-          packet.put(ProcessingConstants.DOMAIN_INTROSPECTOR_LOG_RESULT, result);
+      if (result != null) {
+        convertJobLogsToOperatorLogs(result);
+        if (!severeStatuses.isEmpty()) {
+          updateStatus(packet.getSpi(DomainPresenceInfo.class));
         }
-
-        // Delete the job once we've successfully read the result
-        DomainPresenceInfo info = packet.getSPI(DomainPresenceInfo.class);
-        java.lang.String domainUID = info.getDomain().getDomainUID();
-        java.lang.String namespace = info.getNamespace();
-
-        cleanupJobArtifacts(packet);
-
-        return doNext(
-            JobHelper.deleteDomainIntrospectorJobStep(domainUID, namespace, getNext()), packet);
+        packet.put(ProcessingConstants.DOMAIN_INTROSPECTOR_LOG_RESULT, result);
+        MakeRightDomainOperation.recordInspection(packet);
       }
 
-      return onFailure(packet, callResponse);
+      V1Job domainIntrospectorJob =
+            (V1Job) packet.get(ProcessingConstants.DOMAIN_INTROSPECTOR_JOB);
+
+      if (isNotComplete(domainIntrospectorJob)) {
+        List<String> jobConditionsReason = new ArrayList<>();
+        if (domainIntrospectorJob != null) {
+          logIntrospectorFailure(packet, domainIntrospectorJob);
+          V1JobStatus status = domainIntrospectorJob.getStatus();
+          if (status != null && status.getConditions() != null) {
+            for (V1JobCondition cond : status.getConditions()) {
+              jobConditionsReason.add(cond.getReason());
+            }
+          }
+        }
+        if (jobConditionsReason.size() == 0) {
+          jobConditionsReason.add(DomainStatusUpdater.ERR_INTROSPECTOR);
+        }
+        //Introspector job is incomplete, update domain status and terminate processing
+        return doNext(
+            DomainStatusUpdater.createFailedStep(
+              onSeparateLines(jobConditionsReason),
+              onSeparateLines(severeStatuses),
+                null),
+            packet);
+      }
+
+      return doNext(packet);
     }
 
-    private void cleanupJobArtifacts(Packet packet) {
-      packet.remove(ProcessingConstants.JOB_POD_NAME);
-      packet.remove(ProcessingConstants.DOMAIN_INTROSPECTOR_JOB);
+    private boolean isNotComplete(V1Job domainIntrospectorJob) {
+      return !JobWatcher.isComplete(domainIntrospectorJob);
+    }
+
+    // Parse log messages out of a Job Log
+    //  - assumes each job log message starts with '@['
+    //  - assumes any lines that don't start with '@[' are part
+    //    of the previous log message
+    //  - ignores all lines in the log up to the first line that starts with '@['
+    private void convertJobLogsToOperatorLogs(String jobLogs) {
+      for (String line : jobLogs.split(EOL_PATTERN)) {
+        if (line.startsWith("@[")) {
+          logToOperator();
+          logMessage = new StringBuilder(INTROSPECTOR_LOG_PREFIX).append(line.trim());
+        } else if (logMessage.length() > 0) {
+          logMessage.append(System.lineSeparator()).append(line.trim());
+        }
+      }
+      logToOperator();
+    }
+
+    private void logToOperator() {
+      if (logMessage.length() == 0) {
+        return;
+      }
+
+      String logMsg = logMessage.toString();
+      switch (getLogLevel(logMsg)) {
+        case "SEVERE":
+          addSevereStatus(logMsg); // fall through
+        case "ERROR":
+          LOGGER.severe(logMsg);
+          break;
+        case "WARNING":
+          LOGGER.warning(logMsg);
+          break;
+        case "INFO":
+          LOGGER.info(logMsg);
+          break;
+        case "FINER":
+          LOGGER.finer(logMsg);
+          break;
+        case "FINEST":
+          LOGGER.finest(logMsg);
+          break;
+        case "FINE":
+        default:
+          LOGGER.fine(logMsg);
+          break;
+      }
+    }
+
+    private void addSevereStatus(String logMsg) {
+      int index = logMsg.toUpperCase().lastIndexOf("[SEVERE]") + "[SEVERE]".length();
+      severeStatuses.add(logMsg.substring(index).trim());
+    }
+
+    private String getLogLevel(String logMsg) {
+      String regExp = ".*\\[(SEVERE|ERROR|WARNING|INFO|FINE|FINER|FINEST)].*";
+      return getFirstLine(logMsg).toUpperCase().replaceAll(regExp, "$1");
+    }
+
+    private String getFirstLine(String logMsg) {
+      return logMsg.split(EOL_PATTERN)[0];
+    }
+
+    private void updateStatus(DomainPresenceInfo domainPresenceInfo) {
+      DomainStatusPatch.updateSynchronously(
+            domainPresenceInfo.getDomain(), DomainStatusUpdater.ERR_INTROSPECTOR, onSeparateLines(severeStatuses));
+    }
+
+    private String onSeparateLines(List<String> lines) {
+      return String.join(System.lineSeparator(), lines);
     }
   }
 
-  /**
-   * Factory for {@link Step} that reads WebLogic domain introspector pod
-   *
-   * @param next Next processing step
-   * @return Step for reading WebLogic domain introspector pod
-   */
-  public static Step readDomainIntrospectorPodStep(Step next) {
-    return new ReadDomainIntrospectorPodStep(next);
+  private static void logIntrospectorFailure(Packet packet, V1Job domainIntrospectorJob) {
+    Boolean logged = (Boolean) packet.get(ProcessingConstants.INTROSPECTOR_JOB_FAILURE_LOGGED);
+    String jobPodName = (String) packet.get(ProcessingConstants.JOB_POD_NAME);
+    if (logged == null || !logged.booleanValue()) {
+      packet.put(ProcessingConstants.INTROSPECTOR_JOB_FAILURE_LOGGED, Boolean.valueOf(true));
+      LOGGER.info(INTROSPECTOR_JOB_FAILED,
+          domainIntrospectorJob.getMetadata().getName(),
+          domainIntrospectorJob.getMetadata().getNamespace(),
+          domainIntrospectorJob.getStatus().toString(),
+          jobPodName);
+      LOGGER.fine(INTROSPECTOR_JOB_FAILED_DETAIL,
+          domainIntrospectorJob.getMetadata().getNamespace(),
+          domainIntrospectorJob.getMetadata().getName(),
+          domainIntrospectorJob.toString());
+    }
   }
 
   private static class ReadDomainIntrospectorPodStep extends Step {
@@ -369,32 +576,26 @@ public class JobHelper {
 
     @Override
     public NextAction apply(Packet packet) {
-      DomainPresenceInfo info = packet.getSPI(DomainPresenceInfo.class);
-      String domainUID = info.getDomain().getDomainUID();
+      DomainPresenceInfo info = packet.getSpi(DomainPresenceInfo.class);
+      String domainUid = info.getDomain().getDomainUid();
       String namespace = info.getNamespace();
 
-      return doNext(readDomainIntrospectorPod(domainUID, namespace, getNext()), packet);
+      return doNext(readDomainIntrospectorPod(domainUid, namespace, getNext()), packet);
     }
 
-    private Step readDomainIntrospectorPod(String domainUID, String namespace, Step next) {
-
-      Step step =
-          new CallBuilder()
-              .withLabelSelectors(LabelConstants.JOBNAME_LABEL)
-              .listPodAsync(namespace, new PodListStep(domainUID, namespace, next));
-
-      return step;
+    private Step readDomainIntrospectorPod(String domainUid, String namespace, Step next) {
+      return new CallBuilder()
+            .withLabelSelectors(LabelConstants.JOBNAME_LABEL)
+            .listPodAsync(namespace, new PodListStep(domainUid, next));
     }
   }
 
   private static class PodListStep extends ResponseStep<V1PodList> {
-    private final String ns;
-    private final String domainUID;
+    private final String domainUid;
 
-    PodListStep(String domainUID, String ns, Step next) {
+    PodListStep(String domainUid, Step next) {
       super(next);
-      this.domainUID = domainUID;
-      this.ns = ns;
+      this.domainUid = domainUid;
     }
 
     @Override
@@ -404,18 +605,28 @@ public class JobHelper {
 
     @Override
     public NextAction onSuccess(Packet packet, CallResponse<V1PodList> callResponse) {
-      String jobNamePrefix = createJobName(domainUID);
-      V1PodList result = callResponse.getResult();
-      if (result != null) {
-        for (V1Pod pod : result.getItems()) {
-          if (pod.getMetadata().getName().startsWith(jobNamePrefix)) {
-            LOGGER.fine("+++++ JobHelper.PodListStep pod: " + pod.toString());
-            packet.put(ProcessingConstants.JOB_POD_NAME, pod.getMetadata().getName());
-          }
-        }
-      }
+      Optional.ofNullable(callResponse.getResult())
+            .map(V1PodList::getItems)
+            .orElseGet(Collections::emptyList)
+            .stream()
+            .map(this::getName)
+            .filter(this::isJobPodName)
+            .findFirst()
+            .ifPresent(name -> recordJobPodName(packet, name));
 
       return doNext(packet);
+    }
+
+    private String getName(V1Pod pod) {
+      return Optional.of(pod).map(V1Pod::getMetadata).map(V1ObjectMeta::getName).orElse("");
+    }
+
+    private boolean isJobPodName(String podName) {
+      return podName.startsWith(createJobName(domainUid));
+    }
+
+    private void recordJobPodName(Packet packet, String podName) {
+      packet.put(ProcessingConstants.JOB_POD_NAME, podName);
     }
   }
 }

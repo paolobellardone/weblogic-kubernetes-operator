@@ -1,21 +1,9 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.builders;
 
-import io.kubernetes.client.ProgressRequestBody;
-import io.kubernetes.client.ProgressResponseBody;
-
 public interface CallParams {
-  /**
-   * Returns a boolean indicating whether partially initialized results should be included in the
-   * response.
-   *
-   * @return the current setting of the parameter. Defaults to including everything.
-   */
-  Boolean getIncludeUninitialized();
-
   /**
    * Returns the limit on the number of updates to send in a single reply.
    *
@@ -63,18 +51,4 @@ public interface CallParams {
    * @return the current setting. Defaults to null.
    */
   String getResourceVersion();
-
-  /**
-   * Returns a listener for responses received, to specify on calls.
-   *
-   * @return the set listener. Defaults to null.
-   */
-  ProgressResponseBody.ProgressListener getProgressListener();
-
-  /**
-   * Returns a listener for requests sent, to specify on calls.
-   *
-   * @return the set listener. Defaults to null.
-   */
-  ProgressRequestBody.ProgressRequestListener getProgressRequestListener();
 }

@@ -1,15 +1,35 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.create;
+
+import io.kubernetes.client.custom.Quantity;
+import io.kubernetes.client.openapi.models.V1ClusterRole;
+import io.kubernetes.client.openapi.models.V1ClusterRoleBinding;
+import io.kubernetes.client.openapi.models.V1ConfigMap;
+import io.kubernetes.client.openapi.models.V1Container;
+import io.kubernetes.client.openapi.models.V1Deployment;
+import io.kubernetes.client.openapi.models.V1LabelSelector;
+import io.kubernetes.client.openapi.models.V1Namespace;
+import io.kubernetes.client.openapi.models.V1Probe;
+import io.kubernetes.client.openapi.models.V1ResourceRequirements;
+import io.kubernetes.client.openapi.models.V1Role;
+import io.kubernetes.client.openapi.models.V1RoleBinding;
+import io.kubernetes.client.openapi.models.V1Secret;
+import io.kubernetes.client.openapi.models.V1Service;
+import io.kubernetes.client.openapi.models.V1ServiceAccount;
+import io.kubernetes.client.openapi.models.V1ServiceSpec;
+import oracle.kubernetes.operator.utils.GeneratedOperatorObjects;
+import oracle.kubernetes.operator.utils.KubernetesArtifactUtils;
+import oracle.kubernetes.operator.utils.OperatorValues;
+import oracle.kubernetes.operator.utils.OperatorYamlFactory;
+import org.apache.commons.codec.binary.Base64;
+import org.junit.Test;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
 import static oracle.kubernetes.operator.LabelConstants.APP_LABEL;
 import static oracle.kubernetes.operator.LabelConstants.OPERATORNAME_LABEL;
-import static oracle.kubernetes.operator.LabelConstants.RESOURCE_VERSION_LABEL;
-import static oracle.kubernetes.operator.VersionConstants.OPERATOR_V2;
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.newClusterRole;
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.newClusterRoleBinding;
 import static oracle.kubernetes.operator.utils.KubernetesArtifactUtils.newClusterRoleRef;
@@ -44,35 +64,14 @@ import static oracle.kubernetes.operator.utils.YamlUtils.yamlEqualTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.fail;
 
-import io.kubernetes.client.models.ExtensionsV1beta1Deployment;
-import io.kubernetes.client.models.V1ClusterRole;
-import io.kubernetes.client.models.V1ClusterRoleBinding;
-import io.kubernetes.client.models.V1ConfigMap;
-import io.kubernetes.client.models.V1Namespace;
-import io.kubernetes.client.models.V1Role;
-import io.kubernetes.client.models.V1RoleBinding;
-import io.kubernetes.client.models.V1Secret;
-import io.kubernetes.client.models.V1Service;
-import io.kubernetes.client.models.V1ServiceAccount;
-import io.kubernetes.client.models.V1ServiceSpec;
-import oracle.kubernetes.operator.utils.GeneratedOperatorObjects;
-import oracle.kubernetes.operator.utils.KubernetesArtifactUtils;
-import oracle.kubernetes.operator.utils.OperatorValues;
-import oracle.kubernetes.operator.utils.OperatorYamlFactory;
-import org.apache.commons.codec.binary.Base64;
-import org.junit.Test;
-
 /**
  * Base class for testing that the all artifacts in the yaml files that create-weblogic-operator.sh
  * generates
  */
 public abstract class CreateOperatorGeneratedFilesTestBase {
 
-  private static String OPERATOR_RELEASE = "weblogic-operator";
-
   private static OperatorValues inputs;
   private static GeneratedOperatorObjects generatedFiles;
-  private static OperatorYamlFactory factory;
 
   protected static OperatorValues getInputs() {
     return inputs;
@@ -82,8 +81,7 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
     return generatedFiles;
   }
 
-  protected static void setup(OperatorYamlFactory factory, OperatorValues val) throws Exception {
-    CreateOperatorGeneratedFilesTestBase.factory = factory;
+  static void setup(OperatorYamlFactory factory, OperatorValues val) throws Exception {
     inputs = val;
     generatedFiles = factory.generate(val);
   }
@@ -105,8 +103,8 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                 newObjectMeta()
                     .name("weblogic-operator-cm")
                     .namespace(getInputs().getNamespace())
-                    .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                     .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
+            .putDataItem("dedicated", getInputs().getDedicated())
             .putDataItem("serviceaccount", getInputs().getServiceAccount())
             .putDataItem("targetNamespaces", getInputs().getTargetNamespaces());
     if (expectExternalCredentials()) {
@@ -136,7 +134,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                 newObjectMeta()
                     .name("weblogic-operator-secrets")
                     .namespace(getInputs().getNamespace())
-                    .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                     .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
             .type("Opaque");
     if (expectExternalCredentials()) {
@@ -163,26 +160,26 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         yamlEqualTo(getExpectedWeblogicOperatorDeployment()));
   }
 
-  private ExtensionsV1beta1Deployment getActualWeblogicOperatorDeployment() {
+  private V1Deployment getActualWeblogicOperatorDeployment() {
     return getGeneratedFiles().getOperatorDeployment();
   }
 
-  protected ExtensionsV1beta1Deployment getExpectedWeblogicOperatorDeployment() {
+  protected V1Deployment getExpectedWeblogicOperatorDeployment() {
     return newDeployment()
         .metadata(
             newObjectMeta()
                 .name("weblogic-operator")
                 .namespace(getInputs().getNamespace())
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .spec(
             newDeploymentSpec()
+                .selector(new V1LabelSelector()
+                    .putMatchLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
                 .replicas(1)
                 .template(
                     newPodTemplateSpec()
                         .metadata(
                             newObjectMeta()
-                                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace())
                                 .putLabelsItem(APP_LABEL, "weblogic-operator"))
                         .spec(
@@ -210,6 +207,13 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                                             newEnvVar()
                                                 .name("JAVA_LOGGING_LEVEL")
                                                 .value(getInputs().getJavaLoggingLevel()))
+                                        .addEnvItem(
+                                            newEnvVar().name("ISTIO_ENABLED").value("false"))
+                                        .resources(
+                                            new V1ResourceRequirements()
+                                                .putRequestsItem("cpu", Quantity.fromString("100m"))
+                                                .putRequestsItem(
+                                                    "memory", Quantity.fromString("512Mi")))
                                         .addVolumeMountsItem(
                                             newVolumeMount()
                                                 .name("weblogic-operator-cm-volume")
@@ -222,16 +226,7 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                                             newVolumeMount()
                                                 .name("weblogic-operator-secrets-volume")
                                                 .mountPath("/operator/secrets")
-                                                .readOnly(true))
-                                        .livenessProbe(
-                                            newProbe()
-                                                .initialDelaySeconds(120)
-                                                .periodSeconds(5)
-                                                .exec(
-                                                    newExecAction()
-                                                        .addCommandItem("bash")
-                                                        .addCommandItem(
-                                                            "/operator/livenessProbe.sh"))))
+                                                .readOnly(true)))
                                 .addVolumesItem(
                                     newVolume()
                                         .name("weblogic-operator-cm-volume")
@@ -253,6 +248,19 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                                                 .secretName("weblogic-operator-secrets"))))));
   }
 
+  void expectProbes(V1Container container) {
+    container
+        .livenessProbe(createProbe(20, 5, "/operator/livenessProbe.sh"))
+        .readinessProbe(createProbe(2, 10, "/operator/readinessProbe.sh"));
+  }
+
+  private V1Probe createProbe(int initialDelaySeconds, int periodSeconds, String shellScript) {
+    return newProbe()
+        .initialDelaySeconds(initialDelaySeconds)
+        .periodSeconds(periodSeconds)
+        .exec(newExecAction().addCommandItem("bash").addCommandItem(shellScript));
+  }
+
   @Test
   public void generatesCorrect_externalWeblogicOperatorService() {
     V1Service expected = getExpectedExternalWeblogicOperatorService();
@@ -263,6 +271,7 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         getGeneratedFiles().getExternalOperatorService();
         fail("Should not have found an external operator service yaml");
       } catch (AssertionError ignored) {
+        // no-op
       }
     }
   }
@@ -295,7 +304,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
             newObjectMeta()
                 .name("external-weblogic-operator-svc")
                 .namespace(getInputs().getNamespace())
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .spec(spec);
   }
@@ -317,7 +325,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
             newObjectMeta()
                 .name("internal-weblogic-operator-svc")
                 .namespace(getInputs().getNamespace())
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .spec(
             newServiceSpec()
@@ -341,7 +348,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         .metadata(
             newObjectMeta()
                 .name(getInputs().getNamespace())
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()));
   }
 
@@ -362,7 +368,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
             newObjectMeta()
                 .name(getInputs().getServiceAccount())
                 .namespace(getInputs().getNamespace())
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()));
   }
 
@@ -382,27 +387,12 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         .metadata(
             newObjectMeta()
                 .name(getInputs().getNamespace() + "-weblogic-operator-clusterrole-general")
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("")
                 .resources(singletonList("namespaces"))
                 .verbs(asList("get", "list", "watch")))
-        .addRulesItem(
-            newPolicyRule()
-                .addApiGroupsItem("")
-                .resources(singletonList("persistentvolumes"))
-                .verbs(
-                    asList(
-                        "get",
-                        "list",
-                        "watch",
-                        "create",
-                        "update",
-                        "patch",
-                        "delete",
-                        "deletecollection")))
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("apiextensions.k8s.io")
@@ -414,33 +404,13 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                         "watch",
                         "create",
                         "update",
-                        "patch",
-                        "delete",
-                        "deletecollection")))
+                        "patch")))
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("weblogic.oracle")
                 .addResourcesItem("domains")
-                .verbs(asList("get", "list", "watch", "update", "patch")))
-        .addRulesItem(
-            newPolicyRule()
-                .addApiGroupsItem("weblogic.oracle")
                 .addResourcesItem("domains/status")
-                .addVerbsItem("update"))
-        .addRulesItem(
-            newPolicyRule()
-                .addApiGroupsItem("extensions")
-                .addResourcesItem("ingresses")
-                .verbs(
-                    asList(
-                        "get",
-                        "list",
-                        "watch",
-                        "create",
-                        "update",
-                        "patch",
-                        "delete",
-                        "deletecollection")))
+                .verbs(asList("get", "list", "watch", "update", "patch")))
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("authentication.k8s.io")
@@ -449,12 +419,7 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("authorization.k8s.io")
-                .resources(
-                    asList(
-                        "selfsubjectaccessreviews",
-                        "localsubjectaccessreviews",
-                        "subjectaccessreviews",
-                        "selfsubjectrulesreviews"))
+                .resources(singletonList("selfsubjectrulesreviews"))
                 .verbs(singletonList("create")));
   }
 
@@ -470,7 +435,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         .metadata(
             newObjectMeta()
                 .name(getInputs().getNamespace() + "-weblogic-operator-clusterrole-nonresource")
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .addRulesItem(newPolicyRule().addNonResourceURLsItem("/version/*").addVerbsItem("get"));
   }
@@ -486,7 +450,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                         .name(
                             getInputs().getNamespace()
                                 + "-weblogic-operator-clusterrolebinding-general")
-                        .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                         .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
                 .addSubjectsItem(
                     newSubject()
@@ -518,7 +481,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                 .name(
                     getInputs().getNamespace()
                         + "-weblogic-operator-clusterrolebinding-nonresource")
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .addSubjectsItem(
             newSubject()
@@ -545,7 +507,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
             newObjectMeta()
                 .name(
                     getInputs().getNamespace() + "-weblogic-operator-clusterrolebinding-discovery")
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .addSubjectsItem(
             newSubject()
@@ -573,7 +534,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                 .name(
                     getInputs().getNamespace()
                         + "-weblogic-operator-clusterrolebinding-auth-delegator")
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .addSubjectsItem(
             newSubject()
@@ -599,7 +559,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         .metadata(
             newObjectMeta()
                 .name(getInputs().getNamespace() + "-weblogic-operator-clusterrole-namespace")
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .addRulesItem(
             newPolicyRule()
@@ -609,9 +568,7 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                         "services",
                         "configmaps",
                         "pods",
-                        "podtemplates",
-                        "events",
-                        "persistentvolumeclaims"))
+                        "events"))
                 .verbs(
                     asList(
                         "get",
@@ -636,11 +593,11 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
             newPolicyRule()
                 .addApiGroupsItem("")
                 .resources(singletonList("pods/exec"))
-                .verbs(singletonList("create")))
+                .verbs(asList("get", "create")))
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("batch")
-                .resources(asList("jobs", "cronjobs"))
+                .resources(singletonList("jobs"))
                 .verbs(
                     asList(
                         "get",
@@ -650,40 +607,7 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                         "update",
                         "patch",
                         "delete",
-                        "deletecollection")))
-        .addRulesItem(
-            newPolicyRule()
-                .addApiGroupsItem("settings.k8s.io")
-                .addResourcesItem("podpresets")
-                .verbs(
-                    asList(
-                        "get",
-                        "list",
-                        "watch",
-                        "create",
-                        "update",
-                        "patch",
-                        "delete",
-                        "deletecollection")))
-        .addRulesItem(
-            newPolicyRule()
-                .addApiGroupsItem("extensions")
-                .resources(asList("podsecuritypolicies", "networkpolicies"))
-                .verbs(
-                    asList(
-                        "get",
-                        "list",
-                        "watch",
-                        "create",
-                        "update",
-                        "patch",
-                        "delete",
-                        "deletecollection")))
-        .addRulesItem(
-            newPolicyRule()
-                .addApiGroupsItem("storage.k8s.io")
-                .addResourcesItem("storageclasses")
-                .verbs(asList("get", "list", "watch")));
+                        "deletecollection")));
   }
 
   @Test
@@ -702,7 +626,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
             newObjectMeta()
                 .name("weblogic-operator-rolebinding-namespace")
                 .namespace(namespace)
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .addSubjectsItem(
             newSubject()
@@ -713,6 +636,25 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         .roleRef(
             newClusterRoleRef()
                 .name(getInputs().getNamespace() + "-weblogic-operator-clusterrole-namespace")
+                .apiGroup(KubernetesArtifactUtils.API_GROUP_RBAC));
+  }
+
+  private V1RoleBinding getExpectedWeblogicOperatorRoleBinding() {
+    return newRoleBinding()
+        .metadata(
+            newObjectMeta()
+                .name("weblogic-operator-rolebinding")
+                .namespace(getInputs().getNamespace())
+                .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
+        .addSubjectsItem(
+            newSubject()
+                .kind("ServiceAccount")
+                .name(getInputs().getServiceAccount())
+                .namespace(getInputs().getNamespace())
+                .apiGroup(""))
+        .roleRef(
+            newRoleRef()
+                .name("weblogic-operator-role")
                 .apiGroup(KubernetesArtifactUtils.API_GROUP_RBAC));
   }
 
@@ -729,7 +671,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
             newObjectMeta()
                 .name("weblogic-operator-role")
                 .namespace(getInputs().getNamespace())
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .addRulesItem(
             newPolicyRule()
@@ -752,26 +693,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
     assertThat(
         getGeneratedFiles().getWeblogicOperatorRoleBinding(),
         yamlEqualTo(getExpectedWeblogicOperatorRoleBinding()));
-  }
-
-  private V1RoleBinding getExpectedWeblogicOperatorRoleBinding() {
-    return newRoleBinding()
-        .metadata(
-            newObjectMeta()
-                .name("weblogic-operator-rolebinding")
-                .namespace(getInputs().getNamespace())
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
-                .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
-        .addSubjectsItem(
-            newSubject()
-                .kind("ServiceAccount")
-                .name(getInputs().getServiceAccount())
-                .namespace(getInputs().getNamespace())
-                .apiGroup(""))
-        .roleRef(
-            newRoleRef()
-                .name("weblogic-operator-role")
-                .apiGroup(KubernetesArtifactUtils.API_GROUP_RBAC));
   }
 
   @SuppressWarnings("unused")
@@ -798,8 +719,13 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
             newObjectMeta()
                 .name("external-weblogic-operator-svc")
                 .namespace(inputs.getNamespace())
-                .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .spec(spec);
+  }
+
+  protected void expectRemoteDebug(V1Container operatorContainer, String debugSuspend) {
+    operatorContainer.addEnvItem(
+        newEnvVar().name("REMOTE_DEBUG_PORT").value(getInputs().getInternalDebugHttpPort()));
+    operatorContainer.addEnvItem(newEnvVar().name("DEBUG_SUSPEND").value(debugSuspend));
   }
 }

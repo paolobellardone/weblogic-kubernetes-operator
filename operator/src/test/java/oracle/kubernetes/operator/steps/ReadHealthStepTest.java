@@ -1,112 +1,297 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.steps;
 
-import static oracle.kubernetes.LogMatcher.containsFine;
-import static oracle.kubernetes.operator.logging.MessageKeys.WLS_HEALTH_READ_FAILED;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.*;
-
-import com.meterware.simplestub.Memento;
-import com.meterware.simplestub.Stub;
-import io.kubernetes.client.models.V1Service;
+import java.net.URI;
+import java.net.http.HttpRequest;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import oracle.kubernetes.TestUtils;
-import oracle.kubernetes.operator.ProcessingConstants;
-import oracle.kubernetes.operator.http.HttpClient;
-import oracle.kubernetes.operator.steps.ReadHealthStep.ReadHealthWithHttpClientStep;
-import oracle.kubernetes.operator.work.Component;
-import oracle.kubernetes.operator.work.NextAction;
+
+import com.meterware.simplestub.Memento;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1Secret;
+import io.kubernetes.client.openapi.models.V1Service;
+import io.kubernetes.client.openapi.models.V1ServicePort;
+import io.kubernetes.client.openapi.models.V1ServiceSpec;
+import oracle.kubernetes.operator.DomainProcessorTestSetup;
+import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
+import oracle.kubernetes.operator.helpers.KubernetesTestSupport;
+import oracle.kubernetes.operator.http.HttpAsyncTestSupport;
+import oracle.kubernetes.operator.http.HttpResponseStub;
+import oracle.kubernetes.operator.utils.WlsDomainConfigSupport;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
+import oracle.kubernetes.operator.work.TerminalStep;
+import oracle.kubernetes.utils.TestUtils;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.ServerHealth;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import static com.meterware.simplestub.Stub.createStub;
+import static oracle.kubernetes.operator.DomainProcessorTestSetup.NS;
+import static oracle.kubernetes.operator.DomainProcessorTestSetup.SECRET_NAME;
+import static oracle.kubernetes.operator.LabelConstants.CLUSTERNAME_LABEL;
+import static oracle.kubernetes.operator.ProcessingConstants.DOMAIN_TOPOLOGY;
+import static oracle.kubernetes.operator.ProcessingConstants.REMAINING_SERVERS_HEALTH_TO_READ;
+import static oracle.kubernetes.operator.ProcessingConstants.SERVER_HEALTH_MAP;
+import static oracle.kubernetes.operator.ProcessingConstants.SERVER_NAME;
+import static oracle.kubernetes.operator.ProcessingConstants.SERVER_STATE_MAP;
+import static oracle.kubernetes.operator.helpers.SecretHelper.ADMIN_SERVER_CREDENTIALS_PASSWORD;
+import static oracle.kubernetes.operator.helpers.SecretHelper.ADMIN_SERVER_CREDENTIALS_USERNAME;
+import static oracle.kubernetes.operator.logging.MessageKeys.WLS_HEALTH_READ_FAILED;
+import static oracle.kubernetes.operator.logging.MessageKeys.WLS_HEALTH_READ_FAILED_NO_HTTPCLIENT;
+import static oracle.kubernetes.operator.steps.ReadHealthStep.OVERALL_HEALTH_FOR_SERVER_OVERLOADED;
+import static oracle.kubernetes.operator.steps.ReadHealthStep.OVERALL_HEALTH_NOT_AVAILABLE;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.is;
+
 public class ReadHealthStepTest {
+  static final String OK_RESPONSE =
+      "{\n"
+          + "    \"overallHealthState\": {\n"
+          + "        \"state\": \"ok\",\n"
+          + "        \"subsystemName\": null,\n"
+          + "        \"partitionName\": null,\n"
+          + "        \"symptoms\": []\n"
+          + "    },\n"
+          + "    \"state\": \"RUNNING\",\n"
+          + "    \"activationTime\": 1556759105378\n"
+          + "}";
   // The log messages to be checked during this test
-  private static final String[] LOG_KEYS = {WLS_HEALTH_READ_FAILED};
-
-  private List<LogRecord> logRecords = new ArrayList<>();
-  private Memento consoleControl;
+  private static final String[] LOG_KEYS = {
+    WLS_HEALTH_READ_FAILED, WLS_HEALTH_READ_FAILED_NO_HTTPCLIENT
+  };
+  private static final String DOMAIN_NAME = "domain";
+  private static final String ADMIN_NAME = "admin-server";
+  private static final int ADMIN_PORT_NUM = 3456;
+  private static final String MANAGED_SERVER1 = "managed-server1";
+  private static final int MANAGED_SERVER1_PORT_NUM = 8001;
+  private static final String CONFIGURED_CLUSTER_NAME = "conf-cluster-1";
+  private static final String CONFIGURED_MANAGED_SERVER1 = "conf-managed-server1";
+  private static final String DYNAMIC_CLUSTER_NAME = "dyn-cluster-1";
+  private static final String DYNAMIC_MANAGED_SERVER1 = "dyn-managed-server1";
   private static final ClassCastException CLASSCAST_EXCEPTION = new ClassCastException("");
+  private static final WlsDomainConfigSupport configSupport =
+      new WlsDomainConfigSupport(DOMAIN_NAME)
+          .withWlsServer(ADMIN_NAME, ADMIN_PORT_NUM)
+          .withWlsServer(MANAGED_SERVER1, MANAGED_SERVER1_PORT_NUM)
+          .withWlsCluster(CONFIGURED_CLUSTER_NAME, CONFIGURED_MANAGED_SERVER1)
+          .withDynamicWlsCluster(DYNAMIC_CLUSTER_NAME, DYNAMIC_MANAGED_SERVER1)
+          .withAdminServerName(ADMIN_NAME);
+  private V1Service service = createStub(V1ServiceStub.class);
+  private V1Service headlessService = createStub(V1HeadlessServiceStub.class);
+  private List<LogRecord> logRecords = new ArrayList<>();
+  private List<Memento> mementos = new ArrayList<>();
+  private KubernetesTestSupport testSupport = new KubernetesTestSupport();
+  private HttpAsyncTestSupport httpSupport = new HttpAsyncTestSupport();
+  private TerminalStep terminalStep = new TerminalStep();
+  private Step readHealthStep = ReadHealthStep.createReadHealthStep(terminalStep);
+  private Map<String, ServerHealth> serverHealthMap = new HashMap<>();
+  private Map<String, String> serverStateMap = new HashMap<>();
+  private Domain domain = DomainProcessorTestSetup.createTestDomain();
+  private final DomainPresenceInfo info = new DomainPresenceInfo(domain);
 
+  /**
+   * Javadoc to make the stupid style checker happy, probably because it throws an exception.
+   * @throws NoSuchFieldException it's not gonna happen, OK?
+   */
   @Before
-  public void setup() {
-    consoleControl =
-        TestUtils.silenceOperatorLogger()
+  public void setup() throws NoSuchFieldException {
+    mementos.add(TestUtils.silenceOperatorLogger()
             .collectLogMessages(logRecords, LOG_KEYS)
             .ignoringLoggedExceptions(CLASSCAST_EXCEPTION)
-            .withLogLevel(Level.FINE);
+            .withLogLevel(Level.FINE));
+    mementos.add(testSupport.install());
+    mementos.add(httpSupport.install());
+
+    testSupport.addDomainPresenceInfo(info);
+    testSupport.addToPacket(SERVER_HEALTH_MAP, serverHealthMap);
+    testSupport.addToPacket(SERVER_STATE_MAP, serverStateMap);
+    testSupport.addToPacket(DOMAIN_TOPOLOGY, configSupport.createDomainConfig());
+    testSupport.addToPacket(REMAINING_SERVERS_HEALTH_TO_READ, new AtomicInteger(1));
+
+    defineSecretData();
+  }
+
+  private int getRemainingServersToRead(Packet packet) {
+    return ((AtomicInteger) packet.get(REMAINING_SERVERS_HEALTH_TO_READ)).get();
+  }
+
+  private void selectServer(String serverName) {
+    selectServer(serverName, false);
+  }
+
+  private void selectServer(String serverName, boolean headless) {
+    testSupport.addToPacket(SERVER_NAME, serverName);
+    if (headless) {
+      info.setServerService(serverName, headlessService);
+    } else {
+      info.setServerService(serverName, service);
+    }
+  }
+
+  private void defineSecretData() {
+    testSupport.defineResources(
+                new V1Secret()
+                      .metadata(new V1ObjectMeta().namespace(NS).name(SECRET_NAME))
+                      .data(Map.of(ADMIN_SERVER_CREDENTIALS_USERNAME, "user".getBytes(),
+                                   ADMIN_SERVER_CREDENTIALS_PASSWORD, "password".getBytes())));
   }
 
   @After
   public void tearDown() {
-    consoleControl.revert();
+    mementos.forEach(Memento::revert);
+  }
+  
+  @Test
+  public void whenReadAdminServerHealth_decrementRemainingServers() {
+    selectServer(ADMIN_NAME);
+    defineResponse(200, "");
+
+    Packet packet = testSupport.runSteps(readHealthStep);
+
+    assertThat(getRemainingServersToRead(packet), equalTo(0));
+  }
+
+  private void defineResponse(int status, String body) {
+    defineResponse(status, body, null);
+  }
+
+  private void defineResponse(int status, String body, String url) {
+    if (url == null) {
+      httpSupport.defineResponse(createExpectedRequest("127.0.0.1:7001"), createStub(HttpResponseStub.class,
+              status, body));
+    } else {
+      httpSupport.defineResponse(createExpectedRequest(url), createStub(HttpResponseStub.class, status, body));
+    }
+  }
+
+  private HttpRequest createExpectedRequest(String url) {
+    return HttpRequest.newBuilder()
+          .uri(URI.create("https://" + url + "/management/weblogic/latest/serverRuntime/search"))
+          .POST(HttpRequest.BodyPublishers.noBody())
+          .build();
+  }
+
+
+  @Test
+  public void whenReadConfiguredManagedServerHealth_decrementRemainingServers() {
+    selectServer(CONFIGURED_MANAGED_SERVER1);
+    configureServiceWithClusterName(CONFIGURED_CLUSTER_NAME);
+    defineResponse(200, "");
+
+    Packet packet = testSupport.runSteps(readHealthStep);
+
+    assertThat(getRemainingServersToRead(packet), equalTo(0));
+  }
+
+  // todo test that correct IP address used for each server
+  // todo test failure to read credentials
+
+  @Test
+  public void whenReadDynamicManagedServerHealth_decrementRemainingServers() {
+    selectServer(DYNAMIC_MANAGED_SERVER1);
+    configureServiceWithClusterName(DYNAMIC_CLUSTER_NAME);
+    defineResponse(200, "");
+
+    Packet packet = testSupport.runSteps(readHealthStep);
+
+    assertThat(getRemainingServersToRead(packet), equalTo(0));
   }
 
   @Test
-  public void withHttpClientStep_Health_logIfFailed() {
-    V1Service service = Stub.createStub(V1ServiceStub.class);
-    Step next = new MockStep(null);
-    final String SERVER_NAME = "admin-server";
-    Packet packet = Stub.createStub(PacketStub.class).withServerName(SERVER_NAME);
+  public void whenServerRunning_verifyServerHealth() {
+    selectServer(MANAGED_SERVER1);
 
-    ReadHealthWithHttpClientStep withHttpClientStep =
-        new ReadHealthWithHttpClientStep(service, next);
-    withHttpClientStep.apply(packet);
+    defineResponse(200, OK_RESPONSE);
 
-    assertThat(logRecords, containsFine(WLS_HEALTH_READ_FAILED, SERVER_NAME));
+    Packet packet = testSupport.runSteps(readHealthStep);
+
+    assertThat(getServerHealthMap(packet).get(MANAGED_SERVER1).getOverallHealth(), equalTo("ok"));
+    assertThat(getServerStateMap(packet).get(MANAGED_SERVER1), is("RUNNING"));
   }
 
-  @Test(expected = IllegalArgumentException.class)
-  public void WithHttpClientStep_const_throws_with_null_service() {
-    Step next = new MockStep(null);
-    new ReadHealthWithHttpClientStep(null, next);
+  @Test
+  public void whenAdminPodIPNull_verifyServerHealth() {
+    selectServer(ADMIN_NAME, true);
+
+    defineResponse(200, OK_RESPONSE, "admin-server.Test:7001");
+
+    Packet packet = testSupport.runSteps(readHealthStep);
+
+    assertThat(getServerStateMap(packet).get(ADMIN_NAME), is("RUNNING"));
   }
 
-  abstract static class PacketStub extends Packet {
+  private Map<String, ServerHealth> getServerHealthMap(Packet packet) {
+    return packet.getValue(SERVER_HEALTH_MAP);
+  }
 
-    Integer retryCount;
-    String serverName;
+  private Map<String, String> getServerStateMap(Packet packet) {
+    return packet.getValue(SERVER_STATE_MAP);
+  }
 
-    PacketStub withServerName(String serverName) {
-      this.serverName = serverName;
-      return this;
+  @Test
+  public void whenServerOverloaded_verifyServerHealth() {
+    selectServer(MANAGED_SERVER1);
+
+    defineResponse(500, "");
+
+    Packet packet = testSupport.runSteps(readHealthStep);
+
+    assertThat(getServerHealthMap(packet).get(MANAGED_SERVER1).getOverallHealth(),
+               equalTo(OVERALL_HEALTH_FOR_SERVER_OVERLOADED));
+    assertThat(getServerStateMap(packet).get(MANAGED_SERVER1), is("UNKNOWN"));
+  }
+
+  @Test
+  public void whenUnableToReadHealth_verifyNotAvailable() {
+    selectServer(MANAGED_SERVER1);
+
+    defineResponse(404, "");
+
+    Packet packet = testSupport.runSteps(readHealthStep);
+
+    assertThat(getServerHealthMap(packet).get(MANAGED_SERVER1).getOverallHealth(),
+               equalTo(OVERALL_HEALTH_NOT_AVAILABLE));
+    assertThat(getServerStateMap(packet).get(MANAGED_SERVER1), is("UNKNOWN"));
+  }
+
+  public abstract static class V1ServiceStub extends V1Service {
+
+    @Override
+    public V1ServiceSpec getSpec() {
+      List<V1ServicePort> ports = new ArrayList<>();
+      ports.add(new V1ServicePort().port(7001).name("default"));
+      return new V1ServiceSpec().clusterIP("127.0.0.1").ports(ports);
     }
+  }
 
-    PacketStub addSpi(Class clazz, Object spiObject) {
-      Component component = Component.createFor(spiObject);
-      this.getComponents().put(clazz.getName(), component);
-      return this;
+  public abstract static class V1HeadlessServiceStub extends V1Service {
+
+    @Override
+    public V1ObjectMeta getMetadata() {
+      return new V1ObjectMeta().name(ADMIN_NAME).namespace("Test");
     }
 
     @Override
-    public Object get(Object key) {
-      if (HttpClient.KEY.equals(key)) {
-        throw CLASSCAST_EXCEPTION; // to go to catch clause in WithHttpClientStep.apply() method
-      } else if (ProcessingConstants.SERVER_NAME.equals(key)) {
-        return serverName;
-      }
-      return super.get(key);
+    public V1ServiceSpec getSpec() {
+      List<V1ServicePort> ports = new ArrayList<>();
+      ports.add(new V1ServicePort().port(7001).name("default"));
+      return new V1ServiceSpec().clusterIP("None").ports(ports);
     }
   }
 
-  public abstract static class V1ServiceStub extends V1Service {}
-
-  static class MockStep extends Step {
-    public MockStep(Step next) {
-      super(next);
-    }
-
-    @Override
-    public NextAction apply(Packet packet) {
-      return null;
-    }
+  private void configureServiceWithClusterName(String clusterName) {
+    service.setMetadata(new V1ObjectMeta().putLabelsItem(CLUSTERNAME_LABEL, clusterName));
   }
+
 }

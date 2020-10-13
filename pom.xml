@@ -1,5 +1,5 @@
-<!-- Copyright 2017, 2018, Oracle Corporation. All Rights Reserved. -->
-<!-- This is unreleased proprietary source code of Oracle Corporation -->
+<!-- Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+     Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl. -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -7,16 +7,17 @@
 
   <groupId>oracle.kubernetes</groupId>
   <artifactId>operator-parent</artifactId>
-  <version>2.0-SNAPSHOT</version>
+  <version>3.0.2</version>
 
   <modules>
-    <module>model</module>
     <module>operator</module>
     <module>swagger</module>
     <module>integration-tests</module>
+    <module>new-integration-tests</module>
     <module>kubernetes</module>
     <module>json-schema-maven-plugin</module>
     <module>json-schema</module>
+    <module>buildtime-reports</module>
   </modules>
 
   <scm>
@@ -24,10 +25,10 @@
     <developerConnection>scm:git:git@github.com:oracle/weblogic-kubernetes-operator.git
     </developerConnection>
     <url>https://github.com/oracle/weblogic-kubernetes-operator</url>
-    <tag>HEAD</tag>
+    <tag>v2.5.0</tag>
   </scm>
 
-  <description>Oracle Weblogic Server Kubernetes Operator</description>
+  <description>Oracle WebLogic Server Kubernetes Operator</description>
   <name>weblogic-kubernetes-operator</name>
   <packaging>pom</packaging>
 
@@ -51,43 +52,281 @@
   </repositories>
 
   <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${maven-compiler-plugin-version}</version>
+          <configuration>
+            <release>11</release>
+            <compilerArgs>
+              <arg>-Xpkginfo:always</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-checkstyle-plugin</artifactId>
+          <version>${maven-checkstyle-plugin-version}</version>
+          <executions>
+            <execution>
+              <id>checkstyle</id>
+              <phase>test</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+              <configuration>
+                <consoleOutput>true</consoleOutput>
+                <configLocation>${checkstyle.config.location}</configLocation>
+                <suppressionsLocation>${root.basedir}/build-tools/checkstyle/suppressions.xml</suppressionsLocation>
+                <encoding>UTF-8</encoding>
+                <failOnViolation>true</failOnViolation>
+                <violationSeverity>warning</violationSeverity>
+                <includeTestResources>true</includeTestResources>
+                <includeTestSourceDirectory>true</includeTestSourceDirectory>
+              </configuration>
+            </execution>
+          </executions>
+          <dependencies>
+            <dependency>
+              <groupId>com.puppycrawl.tools</groupId>
+              <artifactId>checkstyle</artifactId>
+              <version>8.30</version>
+            </dependency>
+          </dependencies>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-pmd-plugin</artifactId>
+          <version>${maven-pmd-plugin-version}</version>
+          <configuration>
+            <sourceEncoding>utf-8</sourceEncoding>
+            <rulesets>
+              <ruleset>${root.basedir}/build-tools/pmd/weblogicx-ruleset.xml</ruleset>
+            </rulesets>
+            <printFailingErrors>true</printFailingErrors>
+            <failOnViolation>false</failOnViolation>
+          </configuration>
+          <executions>
+            <execution>
+              <phase>test</phase>
+              <goals>
+                <goal>pmd</goal>
+              </goals>
+            </execution>
+          </executions>
+          <dependencies>
+            <dependency>
+              <groupId>net.sourceforge.pmd</groupId>
+              <artifactId>pmd-java</artifactId>
+              <version>6.21.0</version>
+            </dependency>
+          </dependencies>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-enforcer-plugin</artifactId>
+          <version>${maven-enforcer-plugin-version}</version>
+          <executions>
+            <execution>
+              <id>enforce-maven</id>
+              <goals>
+                <goal>enforce</goal>
+              </goals>
+              <configuration>
+                <rules>
+                  <requireMavenVersion>
+                    <version>${maven.version.range}</version>
+                  </requireMavenVersion>
+                  <requireJavaVersion>
+                    <version>${java.version.range}</version>
+                  </requireJavaVersion>
+                  <requirePluginVersions></requirePluginVersions>
+                </rules>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-release-plugin</artifactId>
+          <version>${maven-release-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-clean-plugin</artifactId>
+          <version>${maven-clean-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>${maven-install-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-site-plugin</artifactId>
+          <version>${maven-site-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-deploy-plugin</artifactId>
+          <version>${maven-deploy-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>${maven-resources-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>${maven-jar-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${maven-surefire-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>surefire-logger-api</artifactId>
+          <version>${surefire-logger-api-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <version>${maven-dependency-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>exec-maven-plugin</artifactId>
+          <version>${exec-maven-plugin-version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>build-helper-maven-plugin</artifactId>
+          <version>3.0.0</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <version>${maven-failsafe-plugin-version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-release-plugin</artifactId>
-        <version>2.5.3</version>
+        <artifactId>maven-enforcer-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.commonjava.maven.plugins</groupId>
+        <artifactId>directory-maven-plugin</artifactId>
+        <version>0.1</version>
+        <executions>
+          <execution>
+            <id>directories</id>
+            <goals>
+              <goal>highest-basedir</goal>
+            </goals>
+            <phase>initialize</phase>
+            <configuration>
+              <property>root.basedir</property>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
 
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
-        <version>3.0.1</version>
-        <configuration>
-          <aggregate>true</aggregate>
-          <show>public</show>
-          <author>false</author>
-          <!-- later Copyright 2018, {currentYear} -->
-          <bottom>
-            <![CDATA[<p>Copyright 2018, <a href="http://www.oracle.com">Oracle Corporation</a> and/or its affiliates.  All rights reserved. <br />Licensed under the Universal Permissive License v 1.0 as shown at <a href="http://oss.oracle.com/licenses/upl">http://oss.oracle.com/licenses/upl</a>.<p>]]></bottom>
-          <doctitle>Oracle WebLogic Server Kubernetes Operator v${project.version} API</doctitle>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>com.coveo</groupId>
-        <artifactId>fmt-maven-plugin</artifactId>
-        <version>2.4.0</version>
+        <version>${maven-javadoc-plugin-version}</version>
         <executions>
           <execution>
-            <phase>test</phase>
+            <id>aggregate</id>
             <goals>
-              <goal>check</goal>
+              <goal>aggregate</goal>
             </goals>
+            <phase>site</phase>
+            <configuration>
+              <show>public</show>
+              <author>false</author>
+              <notimestamp>true</notimestamp>
+              <bottom>
+                <![CDATA[<p>Copyright (c) 2018, {currentYear}, <a href="http://www.oracle.com">Oracle Corporation</a> and/or its affiliates. <br />Licensed under the Universal Permissive License v 1.0 as shown at <a href="https://oss.oracle.com/licenses/upl">https://oss.oracle.com/licenses/upl</a>.<p>]]></bottom>
+              <doctitle>Oracle WebLogic Server Kubernetes Operator API</doctitle>
+            </configuration>
           </execution>
         </executions>
       </plugin>
 
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-pmd-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-checkstyle-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
+        <version>${spotbugs-maven-plugin-version}</version>
+        <configuration>
+          <xmlOutput>true</xmlOutput>
+          <failOnError>false</failOnError>
+          <excludeFilterFile>${root.basedir}/build-tools/spotbugs/exclude-common.xml</excludeFilterFile>
+        </configuration>
+        <executions>
+          <execution>
+            <phase>test</phase>
+            <goals>
+              <goal>spotbugs</goal>
+            </goals>
+          </execution>
+        </executions>
+        <dependencies>
+          <dependency>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs</artifactId>
+            <version>${spotbugs-version}</version>
+          </dependency>
+        </dependencies>
+      </plugin>
     </plugins>
   </build>
+
+  <!-- to resolve the warning "[WARNING] Unable to locate Source XRef to link to - DISABLED". With this warning PMD validation will work fine. -->
+  <reporting>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jxr-plugin</artifactId>
+        <version>3.0.0</version>
+      </plugin>
+    </plugins>
+  </reporting>
 
   <profiles>
 
@@ -98,7 +337,7 @@
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-gpg-plugin</artifactId>
-            <version>1.5</version>
+            <version>1.6</version>
             <executions>
               <execution>
                 <id>sign-artifacts</id>
@@ -140,45 +379,6 @@
             </executions>
           </plugin>
 
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-failsafe-plugin</artifactId>
-            <version>2.20.1</version>
-            <configuration> <!-- run tests in parallel -->
-              <encoding>UTF-8</encoding>
-              <argLine>${failsafeArgLine}</argLine>
-              <failIfNoTests>false</failIfNoTests>
-              <systemPropertyVariables>
-                <!-- Add any system properties here -->
-                <!--<project.build.directory>${project.build.directory}</project.build.directory> -->
-                <!--<weblogic.operator.root.directory>${basedir}/..</weblogic.operator.root.directory> -->
-                <!--<TAGS>${env.TAGS}</TAGS> -->
-                <maxThreads>3</maxThreads>
-              </systemPropertyVariables>
-            </configuration>
-
-            <executions>
-              <execution>
-                <id>acceptance-test</id>
-                <goals>
-                  <goal>integration-test</goal>
-                  <goal>verify</goal>
-                </goals>
-                <phase>integration-test</phase>
-                <configuration>
-                  <!-- do not run unit or integration tests -->
-                  <excludes>
-                    <exclude>**/*Test.java</exclude>
-                    <exclude>**/*IT.java</exclude>
-                  </excludes>
-                  <!-- just run acceptance tests -->
-                  <includes>
-                    <include>**/*AT.java</include>
-                  </includes>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
         </plugins>
       </build>
     </profile>
@@ -190,55 +390,38 @@
           <plugin>
             <groupId>org.jacoco</groupId>
             <artifactId>jacoco-maven-plugin</artifactId>
-            <version>${jacoco.version}</version>
             <executions>
-
               <execution>
-                <id>pre-unit-test</id>
+                <id>prepare-agent</id>
                 <goals>
                   <goal>prepare-agent</goal>
                 </goals>
-                <configuration>
-                  <destFile>${sonar.jacoco.reportPath}</destFile>
-                  <propertyName>surefireArgLine</propertyName>
-                </configuration>
               </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
 
+    <profile>
+      <id>jacoco</id>
+      <activation>
+        <property>
+          <name>!no-reports</name>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <version>${jacoco.version}</version>
+            <executions>
               <execution>
-                <id>post-unit-test</id>
-                <phase>test</phase>
                 <goals>
-                  <goal>report</goal>
+                  <goal>prepare-agent</goal>
                 </goals>
-                <configuration>
-                  <outputDirectory>${jacoco.outputDir}</outputDirectory>
-                  <dataFile>${sonar.jacoco.reportPath}</dataFile>
-                </configuration>
               </execution>
-
-              <execution>
-                <id>pre-integration-test</id>
-                <phase>pre-integration-test</phase>
-                <goals>
-                  <goal>prepare-agent-integration</goal>
-                </goals>
-                <configuration>
-                  <destFile>${sonar.jacoco.itReportPath}</destFile>
-                  <propertyName>failsafeArgLine</propertyName>
-                </configuration>
-              </execution>
-              <execution>
-                <id>post-integration-test</id>
-                <phase>post-integration-test</phase>
-                <goals>
-                  <goal>report-integration</goal>
-                </goals>
-                <configuration>
-                  <dataFile>${sonar.jacoco.itReportPath}</dataFile>
-                  <outputDirectory>$jacoco.itOutputDir}</outputDirectory>
-                </configuration>
-              </execution>
-
             </executions>
           </plugin>
         </plugins>
@@ -259,15 +442,26 @@
 
   <dependencyManagement>
     <dependencies>
+      <!-- Add direct bouncycastle dependency to override version from kubernetes/client-java until they update -->
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcprov-ext-jdk15on</artifactId>
+        <version>1.64</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcpkix-jdk15on</artifactId>
+        <version>1.64</version>
+      </dependency>
       <dependency>
         <groupId>io.kubernetes</groupId>
         <artifactId>client-java</artifactId>
-        <version>3.0.0</version>
+        <version>${client-java-version}</version>
       </dependency>
       <dependency>
-        <groupId>org.slf4j</groupId>
-        <artifactId>slf4j-api</artifactId>
-        <version>1.7.25</version>
+        <groupId>io.kubernetes</groupId>
+        <artifactId>client-java-extended</artifactId>
+        <version>${client-java-version}</version>
       </dependency>
       <dependency>
         <groupId>org.hamcrest</groupId>
@@ -275,14 +469,192 @@
         <version>2.0.0.0</version>
       </dependency>
       <dependency>
-        <groupId>junit</groupId>
-        <artifactId>junit</artifactId>
-        <version>4.12</version>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter-api</artifactId>
+        <version>${junit.jupiter.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter-engine</artifactId>
+        <version>${junit.jupiter.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.junit.vintage</groupId>
+        <artifactId>junit-vintage-engine</artifactId>
+        <version>${junit.vintage.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.junit.platform</groupId>
+        <artifactId>junit-platform-launcher</artifactId>
+        <version>${junit.platform.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.junit.platform</groupId>
+        <artifactId>junit-platform-surefire-provider</artifactId>
+        <version>${junit.platform.surefire.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.junit.platform</groupId>
+        <artifactId>junit-platform-engine</artifactId>
+        <version>${junit.platform.version}</version>
       </dependency>
       <dependency>
         <groupId>com.meterware.simplestub</groupId>
         <artifactId>simplestub</artifactId>
-        <version>1.2.9</version>
+        <version>1.3.0</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish</groupId>
+        <artifactId>jakarta.json</artifactId>
+        <version>1.1.6</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.core</groupId>
+        <artifactId>jersey-client</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.media</groupId>
+        <artifactId>jersey-media-json-processing</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.media</groupId>
+        <artifactId>jersey-media-json-jackson</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.media</groupId>
+        <artifactId>jersey-media-multipart</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.inject</groupId>
+        <artifactId>jersey-hk2</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.test-framework</groupId>
+        <artifactId>jersey-test-framework-core</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.test-framework.providers</groupId>
+        <artifactId>jersey-test-framework-provider-grizzly2</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.containers</groupId>
+        <artifactId>jersey-container-grizzly2-http</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.glassfish.jersey.test-framework.providers</groupId>
+        <artifactId>jersey-test-framework-provider-inmemory</artifactId>
+        <version>${jersey-version}</version>
+      </dependency>
+      <!-- JSON processing: jackson -->
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-core</artifactId>
+        <version>${jackson-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-annotations</artifactId>
+        <version>${jackson-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson-databind-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.dataformat</groupId>
+        <artifactId>jackson-dataformat-yaml</artifactId>
+        <version>${jackson-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.datatype</groupId>
+        <artifactId>jackson-datatype-joda</artifactId>
+        <version>${jackson-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.yaml</groupId>
+        <artifactId>snakeyaml</artifactId>
+        <version>${snakeyaml-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>javax.jms</groupId>
+        <artifactId>javax.jms-api</artifactId>
+        <version>2.0.1</version>
+      </dependency>
+      <dependency>
+        <groupId>net.sourceforge.htmlunit</groupId>
+        <artifactId>htmlunit</artifactId>
+        <version>2.38.0</version>
+      </dependency>
+      <dependency>
+        <groupId>javax.xml.bind</groupId>
+        <artifactId>jaxb-api</artifactId>
+        <version>2.3.1</version>
+      </dependency>
+      <dependency>
+        <groupId>javax</groupId>
+        <artifactId>javaee-web-api</artifactId>
+        <version>7.0</version>
+        <type>jar</type>
+      </dependency>
+      <dependency>
+        <groupId>com.kjetland</groupId>
+        <artifactId>mbknor-jackson-jsonschema_2.12</artifactId>
+        <version>1.0.38</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-lang3</artifactId>
+        <version>3.10</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-exec</artifactId>
+        <version>1.3</version>
+      </dependency>
+      <dependency>
+        <groupId>commons-codec</groupId>
+        <artifactId>commons-codec</artifactId>
+        <version>1.14</version>
+      </dependency>
+      <dependency>
+        <groupId>commons-io</groupId>
+        <artifactId>commons-io</artifactId>
+        <version>${commons.io.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.swagger</groupId>
+        <artifactId>swagger-annotations</artifactId>
+        <version>${swagger-core-version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.httpunit</groupId>
+        <artifactId>httpunit</artifactId>
+        <version>1.7.3</version>
+      </dependency>
+      <dependency>
+        <groupId>com.appscode.voyager</groupId>
+        <artifactId>client-java</artifactId>
+        <version>0.1.0</version>
+      </dependency>
+      <dependency>
+        <groupId>org.assertj</groupId>
+        <artifactId>assertj-core</artifactId>
+        <version>${assertj.core.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.awaitility</groupId>
+        <artifactId>awaitility</artifactId>
+        <version>${awaitility-version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -297,33 +669,55 @@
   </dependencies>
 
   <properties>
-    <java.version>1.8</java.version>
-    <maven.compiler.source>${java.version}</maven.compiler.source>
-    <maven.compiler.target>${java.version}</maven.compiler.target>
-    <swagger-core-version>1.5.21</swagger-core-version>
-    <jodatime-version>2.10.1</jodatime-version>
-    <maven-plugin-version>1.0.0</maven-plugin-version>
-    <junit-version>4.12</junit-version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <jersey-version>2.26
-    </jersey-version> <!-- switched from 2.23 to 2.26 to get the RestServer to work -->
-    <jackson-version>2.9.7</jackson-version>
-    <snakeyaml-version>1.23</snakeyaml-version>
-    <guava-version>27.0.1-jre</guava-version>
+    <src-integration-test>${project.basedir}/src/test/java</src-integration-test>
+    <resource-integration-test>${project.basedir}/src/test/resources</resource-integration-test>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+    <java.version.range>11</java.version.range>
+    <maven.version.range>[3.5.2,)</maven.version.range>
+    <maven-enforcer-plugin-version>3.0.0-M3</maven-enforcer-plugin-version>
+    <maven-clean-plugin-version>3.1.0</maven-clean-plugin-version>
+    <maven-compiler-plugin-version>3.8.1</maven-compiler-plugin-version>
+    <maven-deploy-plugin-version>3.0.0-M1</maven-deploy-plugin-version>
+    <maven-install-plugin-version>3.0.0-M1</maven-install-plugin-version>
+    <maven-jar-plugin-version>3.2.0</maven-jar-plugin-version>
+    <maven-resources-plugin-version>3.1.0</maven-resources-plugin-version>
+    <maven-site-plugin-version>3.8.2</maven-site-plugin-version>
+    <maven-surefire-plugin-version>2.22.2</maven-surefire-plugin-version>
+    <surefire-logger-api-version>2.22.2</surefire-logger-api-version>
+    <maven-checkstyle-plugin-version>3.1.1</maven-checkstyle-plugin-version>
+    <maven-pmd-plugin-version>3.13.0</maven-pmd-plugin-version>
+    <maven-release-plugin-version>3.0.0-M1</maven-release-plugin-version>
+    <maven-javadoc-plugin-version>3.1.1</maven-javadoc-plugin-version>
+    <!-- do NOT use the 3.0.0-M4 failsafe-plugin (ignores @BeforeAll failures) -->
+    <maven-failsafe-plugin-version>3.0.0-M3</maven-failsafe-plugin-version>
+    <maven-dependency-plugin-version>3.1.1</maven-dependency-plugin-version>
+    <exec-maven-plugin-version>1.6.0</exec-maven-plugin-version>
+    <spotbugs-maven-plugin-version>3.1.12.2</spotbugs-maven-plugin-version>
+    <spotbugs-version>3.1.12</spotbugs-version>
+    <swagger-core-version>1.6.2</swagger-core-version>
+    <maven-plugin-version>1.0.0</maven-plugin-version>
+    <assertj.core.version>3.15.0</assertj.core.version>
+    <commons.io.version>2.6</commons.io.version>
+    <awaitility-version>4.0.2</awaitility-version>
+    <client-java-version>8.0.2</client-java-version>
+    <junit.jupiter.version>5.6.0</junit.jupiter.version>
+    <junit.vintage.version>5.6.0</junit.vintage.version>
+    <junit.platform.version>1.6.0</junit.platform.version>
+    <junit.platform.surefire.version>1.3.2</junit.platform.surefire.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <jersey-version>2.31</jersey-version>
+    <jackson-version>2.11.1</jackson-version>
+    <jackson-databind-version>2.11.1</jackson-databind-version>
+    <snakeyaml-version>1.26</snakeyaml-version>
     <root-generated-swagger>${project.basedir}/src-generated-swagger</root-generated-swagger>
     <src-generated-swagger>${root-generated-swagger}/main/java</src-generated-swagger>
     <domain-swagger-file>${project.basedir}/swagger/domain.json</domain-swagger-file>
     <skip.unit.tests>false</skip.unit.tests>
-    <sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
-    <jacoco.version>0.7.9</jacoco.version>
-    <sonar.jacoco.reportPath>${project.build.directory}/jacoco.exec</sonar.jacoco.reportPath>
-    <sonar.jacoco.itReportPath>${project.build.directory}/jacoco-it.exec</sonar.jacoco.itReportPath>
-    <jacoco.outputDir>${project.build.directory}/jacoco</jacoco.outputDir>
-    <jacoco.itOutputDir>${project.build.directory}/jacoco-it</jacoco.itOutputDir>
-    <jacoco.destFile>${project.build.directory}/jacoco.exec</jacoco.destFile>
-    <sonar-jacoco-listeners.version>1.4</sonar-jacoco-listeners.version>
-    <sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
-    <jacoco.skip>false</jacoco.skip>
+    <jacoco.version>0.8.5</jacoco.version>
+    <aggregate.report.dir>buildtime-reports/target/site/jacoco-aggregate/jacoco.xml</aggregate.report.dir>
+    <checkstyle.config.location>${root.basedir}/build-tools/checkstyle/customized_google_checks.xml</checkstyle.config.location>
   </properties>
 
 </project>

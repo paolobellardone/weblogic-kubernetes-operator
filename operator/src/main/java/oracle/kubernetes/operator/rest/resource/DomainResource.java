@@ -1,15 +1,18 @@
-// Copyright 2017, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.rest.resource;
 
+import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
+import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
+
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
+import oracle.kubernetes.operator.rest.model.DomainAction;
 import oracle.kubernetes.operator.rest.model.DomainModel;
 
 /**
@@ -32,7 +35,7 @@ public class DomainResource extends BaseResource {
   }
 
   /**
-   * Get a description of this Weblogic domain.
+   * Get a description of this WebLogic domain.
    *
    * @return a DomainModel describing this domain.
    */
@@ -40,11 +43,22 @@ public class DomainResource extends BaseResource {
   @Produces(MediaType.APPLICATION_JSON)
   public DomainModel get() {
     LOGGER.entering(href());
-    DomainModel item = new DomainModel(getDomainUID());
+    DomainModel item = new DomainModel(getDomainUid());
     addSelfAndParentLinks(item);
     addLink(item, "clusters");
     LOGGER.exiting(item);
     return item;
+  }
+
+  /**
+   * Apply changes to this domain. The changes depend on the details of the specified instructions
+   *
+   * @param params - an update command, including a command type and optional parameters
+   */
+  @POST
+  @Consumes(MediaType.APPLICATION_JSON)
+  public void post(final DomainAction params) {
+    getBackend().performDomainAction(getDomainUid(), params);
   }
 
   /**
@@ -60,7 +74,7 @@ public class DomainResource extends BaseResource {
     return result;
   }
 
-  private String getDomainUID() {
+  private String getDomainUid() {
     return getPathSegment();
   }
 }

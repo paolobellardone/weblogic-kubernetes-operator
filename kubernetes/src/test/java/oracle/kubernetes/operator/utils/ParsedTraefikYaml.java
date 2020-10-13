@@ -1,19 +1,19 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
-import io.kubernetes.client.models.ExtensionsV1beta1Deployment;
-import io.kubernetes.client.models.V1ConfigMap;
-import io.kubernetes.client.models.V1Service;
-import io.kubernetes.client.models.V1ServiceAccount;
 import java.nio.file.Path;
+
+import io.kubernetes.client.openapi.models.V1ConfigMap;
+import io.kubernetes.client.openapi.models.V1Deployment;
+import io.kubernetes.client.openapi.models.V1Service;
+import io.kubernetes.client.openapi.models.V1ServiceAccount;
 import oracle.kubernetes.operator.helpers.LegalNames;
 
 /**
  * Parses a generated
- * weblogic-domain-traefik-inputs.LegalNames.toDNS1123LegalName(getClusterName()).yaml file into a
+ * weblogic-domain-traefik-inputs.LegalNames.toDns1123LegalName(getClusterName()).yaml file into a
  * set of typed k8s java objects
  */
 public class ParsedTraefikYaml extends ParsedKubernetesYaml {
@@ -34,7 +34,7 @@ public class ParsedTraefikYaml extends ParsedKubernetesYaml {
     return getServiceAccounts().find(getTraefikScope());
   }
 
-  public ExtensionsV1beta1Deployment getTraefikDeployment() {
+  public V1Deployment getTraefikDeployment() {
     return getDeployments().find(getTraefikScope());
   }
 
@@ -59,6 +59,6 @@ public class ParsedTraefikYaml extends ParsedKubernetesYaml {
   }
 
   private String getClusterScope() {
-    return inputs.getDomainUID() + "-" + LegalNames.toDNS1123LegalName(inputs.getClusterName());
+    return inputs.getDomainUid() + "-" + LegalNames.toDns1123LegalName(inputs.getClusterName());
   }
 }

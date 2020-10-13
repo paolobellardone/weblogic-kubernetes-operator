@@ -1,15 +1,17 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.hamcrest.Description;
 import org.hamcrest.TypeSafeDiagnosingMatcher;
 
-/** Matcher for testing the results of using java to execute a command */
+/**
+ * Matcher for testing the results of using java to execute a command.
+ */
 public class ExecResultMatcher extends TypeSafeDiagnosingMatcher<ExecResult> {
   public static final String MULTI_LINE_REGEXP_PREFIX = "(?s)";
   private int expectedExitValue;
@@ -42,6 +44,12 @@ public class ExecResultMatcher extends TypeSafeDiagnosingMatcher<ExecResult> {
     return ".*" + regexp + ".*";
   }
 
+  /**
+   * match all items.
+   * @param list list
+   * @param more more
+   * @return set of combined
+   */
   public static String[] allOf(String[] list, String... more) {
     String[] combined = new String[list.length + more.length];
     System.arraycopy(list, 0, combined, 0, list.length);

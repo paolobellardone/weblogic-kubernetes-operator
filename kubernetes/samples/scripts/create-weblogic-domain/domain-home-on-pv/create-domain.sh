@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 #
 # Description
 #  This sample script creates a WebLogic domain home on an existing PV/PVC, and generates the domain resource
@@ -26,7 +26,7 @@ source ${scriptDir}/../../common/validate.sh
 function usage {
   echo usage: ${script} -o dir -i file [-e] [-v] [-h]
   echo "  -i Parameter inputs file, must be specified."
-  echo "  -o Ouput directory for the generated yaml files, must be specified."
+  echo "  -o Output directory for the generated yaml files, must be specified."
   echo "  -e Also create the resources in the generated yaml files, optional."
   echo "  -v Validate the existence of persistentVolumeClaim, optional."
   echo "  -h Help"
@@ -86,19 +86,6 @@ function initOutputDir {
 }
 
 #
-#
-# Function to validate the domain's persistent volume claim has been created
-#
-function validateDomainPVC {
-  # Check if the persistent volume claim is already available
-  checkPvcExists ${persistentVolumeClaimName} ${namespace}
-  if [ "${PVC_EXISTS}" = "false" ]; then
-    validationError "The domain persistent volume claim ${persistentVolumeClaimName} does not exist in namespace ${namespace}"
-  fi
-  failIfValidationErrors
-}
-
-#
 # Function to setup the environment to run the create domain job
 #
 function initialize {
@@ -130,7 +117,7 @@ function initialize {
     validationError "The template file ${deleteJobInput} for deleting a WebLogic domain_home folder was not found"
   fi
 
-  dcrInput="${scriptDir}/domain-template.yaml"
+  dcrInput="${scriptDir}/../../common/domain-template.yaml"
   if [ ! -f ${dcrInput} ]; then
     validationError "The template file ${dcrInput} for creating the domain resource was not found"
   fi
@@ -140,153 +127,6 @@ function initialize {
   validateCommonInputs
 
   initOutputDir
-}
-
-
-#
-# Function to generate the yaml files for creating a domain
-#
-function createFiles {
-
-  # Make sure the output directory has a copy of the inputs file.
-  # The user can either pre-create the output directory, put the inputs
-  # file there, and create the domain from it, or the user can put the
-  # inputs file some place else and let this script create the output directory
-  # (if needed) and copy the inputs file there.
-  copyInputsFileToOutputDirectory ${valuesInputFile} "${domainOutputDir}/create-domain-inputs.yaml"
-
-  createJobOutput="${domainOutputDir}/create-domain-job.yaml"
-  deleteJobOutput="${domainOutputDir}/delete-domain-job.yaml"
-  dcrOutput="${domainOutputDir}/domain.yaml"
-
-  enabledPrefix=""     # uncomment the feature
-  disabledPrefix="# "  # comment out the feature
-
-  if [ -z "${image}" ]; then
-    fail "Please specify image in your input YAML"
-  fi
-
-  domainName=${domainUID}
-
-  # Use the default value if not defined.
-  if [ -z "${domainPVMountPath}" ]; then
-    domainPVMountPath="/shared"
-  fi
-
-  if [ -z "${domainHome}" ]; then
-    domainHome="${domainPVMountPath}/domains/${domainUID}"
-  fi
-
-  if [ -z "${logHome}" ]; then
-    logHome="${domainPVMountPath}/logs/${domainUID}"
-  fi
-
-  if [ -z "${weblogicCredentialsSecretName}" ]; then
-    weblogicCredentialsSecretName="${domainUID}-weblogic-credentials"
-  fi
-
-  # Use the default value if not defined.
-  if [ -z "${createDomainScriptsMountPath}" ]; then
-    createDomainScriptsMountPath="/u01/weblogic"
-  fi
-
-  # Use the default value if not defined.
-  if [ -z "${createDomainScriptName}" ]; then
-    createDomainScriptName="create-domain-job.sh"
-  fi
-
-  # Use the default value if not defined.
-  if [ -z "${persistentVolumeClaimName}" ]; then
-    persistentVolumeClaimName=${domainUID}-weblogic-sample-pvc
-  fi
-
-  # Must escape the ':' value in image for sed to properly parse and replace
-  image=$(echo ${image} | sed -e "s/\:/\\\:/g")
-
-  # Generate the yaml to create the kubernetes job that will create the weblogic domain
-  echo Generating ${createJobOutput}
-
-  cp ${createJobInput} ${createJobOutput}
-  sed -i -e "s:%NAMESPACE%:$namespace:g" ${createJobOutput}
-  sed -i -e "s:%WEBLOGIC_CREDENTIALS_SECRET_NAME%:${weblogicCredentialsSecretName}:g" ${createJobOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE%:${image}:g" ${createJobOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_POLICY%:${imagePullPolicy}:g" ${createJobOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_SECRET_NAME%:${imagePullSecretName}:g" ${createJobOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_SECRET_PREFIX%:${imagePullSecretPrefix}:g" ${createJobOutput}
-  sed -i -e "s:%DOMAIN_UID%:${domainUID}:g" ${createJobOutput}
-  sed -i -e "s:%DOMAIN_NAME%:${domainName}:g" ${createJobOutput}
-  sed -i -e "s:%DOMAIN_HOME%:${domainHome}:g" ${createJobOutput}
-  sed -i -e "s:%PRODUCTION_MODE_ENABLED%:${productionModeEnabled}:g" ${createJobOutput}
-  sed -i -e "s:%ADMIN_SERVER_NAME%:${adminServerName}:g" ${createJobOutput}
-  sed -i -e "s:%ADMIN_SERVER_NAME_SVC%:${adminServerNameSVC}:g" ${createJobOutput}
-  sed -i -e "s:%ADMIN_PORT%:${adminPort}:g" ${createJobOutput}
-  sed -i -e "s:%CONFIGURED_MANAGED_SERVER_COUNT%:${configuredManagedServerCount}:g" ${createJobOutput}
-  sed -i -e "s:%MANAGED_SERVER_NAME_BASE%:${managedServerNameBase}:g" ${createJobOutput}
-  sed -i -e "s:%MANAGED_SERVER_NAME_BASE_SVC%:${managedServerNameBaseSVC}:g" ${createJobOutput}
-  sed -i -e "s:%MANAGED_SERVER_PORT%:${managedServerPort}:g" ${createJobOutput}
-  sed -i -e "s:%T3_CHANNEL_PORT%:${t3ChannelPort}:g" ${createJobOutput}
-  sed -i -e "s:%T3_PUBLIC_ADDRESS%:${t3PublicAddress}:g" ${createJobOutput}
-  sed -i -e "s:%CLUSTER_NAME%:${clusterName}:g" ${createJobOutput}
-  sed -i -e "s:%CLUSTER_TYPE%:${clusterType}:g" ${createJobOutput}
-  sed -i -e "s:%DOMAIN_PVC_NAME%:${persistentVolumeClaimName}:g" ${createJobOutput}
-  sed -i -e "s:%DOMAIN_ROOT_DIR%:${domainPVMountPath}:g" ${createJobOutput}
-  sed -i -e "s:%CREATE_DOMAIN_SCRIPT_DIR%:${createDomainScriptsMountPath}:g" ${createJobOutput}
-  sed -i -e "s:%CREATE_DOMAIN_SCRIPT%:${createDomainScriptName}:g" ${createJobOutput}
-
-  # Generate the yaml to create the kubernetes job that will delete the weblogic domain_home folder
-  echo Generating ${deleteJobOutput}
-
-  cp ${deleteJobInput} ${deleteJobOutput}
-  sed -i -e "s:%NAMESPACE%:$namespace:g" ${deleteJobOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE%:${image}:g" ${deleteJobOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_POLICY%:${imagePullPolicy}:g" ${deleteJobOutput}
-  sed -i -e "s:%WEBLOGIC_CREDENTIALS_SECRET_NAME%:${weblogicCredentialsSecretName}:g" ${deleteJobOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_SECRET_NAME%:${imagePullSecretName}:g" ${deleteJobOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_SECRET_PREFIX%:${imagePullSecretPrefix}:g" ${deleteJobOutput}
-  sed -i -e "s:%DOMAIN_UID%:${domainUID}:g" ${deleteJobOutput}
-  sed -i -e "s:%DOMAIN_NAME%:${domainName}:g" ${deleteJobOutput}
-  sed -i -e "s:%DOMAIN_HOME%:${domainHome}:g" ${deleteJobOutput}
-  sed -i -e "s:%DOMAIN_PVC_NAME%:${persistentVolumeClaimName}:g" ${deleteJobOutput}
-  sed -i -e "s:%DOMAIN_ROOT_DIR%:${domainPVMountPath}:g" ${deleteJobOutput}
-
-  # Generate the yaml to create the domain resource
-  echo Generating ${dcrOutput}
-
-  if [ "${exposeAdminT3Channel}" = true ]; then
-    exposeAdminT3ChannelPrefix="${enabledPrefix}"
-  else
-    exposeAdminT3ChannelPrefix="${disabledPrefix}"
-  fi
-
-  if [ "${exposeAdminNodePort}" = true ]; then
-    exposeAdminNodePortPrefix="${enabledPrefix}"
-  else
-    exposeAdminNodePortPrefix="${disabledPrefix}"
-  fi
-
-  cp ${dcrInput} ${dcrOutput}
-  sed -i -e "s:%NAMESPACE%:$namespace:g" ${dcrOutput}
-  sed -i -e "s:%WEBLOGIC_CREDENTIALS_SECRET_NAME%:${weblogicCredentialsSecretName}:g" ${dcrOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_SECRET_PREFIX%:${imagePullSecretPrefix}:g" ${dcrOutput}
-  sed -i -e "s:%DOMAIN_UID%:${domainUID}:g" ${dcrOutput}
-  sed -i -e "s:%DOMAIN_HOME%:${domainHome}:g" ${dcrOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE%:${image}:g" ${dcrOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_POLICY%:${imagePullPolicy}:g" ${dcrOutput}
-  sed -i -e "s:%WEBLOGIC_IMAGE_PULL_SECRET_NAME%:${imagePullSecretName}:g" ${dcrOutput}
-  sed -i -e "s:%INITIAL_MANAGED_SERVER_REPLICAS%:${initialManagedServerReplicas}:g" ${dcrOutput}
-  sed -i -e "s:%EXPOSE_T3_CHANNEL_PREFIX%:${exposeAdminT3ChannelPrefix}:g" ${dcrOutput}
-  sed -i -e "s:%CLUSTER_NAME%:${clusterName}:g" ${dcrOutput}
-  sed -i -e "s:%EXPOSE_ADMIN_PORT_PREFIX%:${exposeAdminNodePortPrefix}:g" ${dcrOutput}
-  sed -i -e "s:%ADMIN_NODE_PORT%:${adminNodePort}:g" ${dcrOutput}
-  sed -i -e "s:%JAVA_OPTIONS%:${javaOptions}:g" ${dcrOutput}
-  sed -i -e "s:%SERVER_START_POLICY%:${serverStartPolicy}:g" ${dcrOutput}
-  sed -i -e "s:%LOG_HOME%:${logHome}:g" ${dcrOutput}
-  sed -i -e "s:%DOMAIN_ROOT_DIR%:${domainPVMountPath}:g" ${dcrOutput}
-  sed -i -e "s:%INCLUDE_SERVER_OUT_IN_POD_LOG%:${includeServerOutInPodLog}:g" ${dcrOutput}
-  sed -i -e "s:%DOMAIN_PVC_NAME%:${persistentVolumeClaimName}:g" ${dcrOutput}
- 
-  # Remove any "...yaml-e" files left over from running sed
-  rm -f ${domainOutputDir}/*.yaml-e
 }
 
 # create domain configmap using what is in the createDomainFilesDir
@@ -313,12 +153,12 @@ function createDomainConfigmap {
   echo domainName: $domainName >> ${externalFilesTmpDir}/create-domain-inputs.yaml
 
   if [ -f ${externalFilesTmpDir}/prepare.sh ]; then
-   sh ${externalFilesTmpDir}/prepare.sh -t ${clusterType} -i ${externalFilesTmpDir}
+   bash ${externalFilesTmpDir}/prepare.sh -i ${externalFilesTmpDir}
   fi
  
   # create the configmap and label it properly
   local cmName=${domainUID}-create-weblogic-sample-domain-job-cm
-  kubectl create configmap ${cmName} -n $namespace --from-file $externalFilesTmpDir
+  kubectl create configmap ${cmName} -n $namespace --from-file $externalFilesTmpDir --dry-run -o yaml | kubectl apply -f -
 
   echo Checking the configmap $cmName was created
   local num=`kubectl get cm -n $namespace | grep ${cmName} | wc | awk ' { print $1; } '`
@@ -326,7 +166,7 @@ function createDomainConfigmap {
     fail "The configmap ${cmName} was not created"
   fi
 
-  kubectl label configmap ${cmName} -n $namespace weblogic.resourceVersion=domain-v2 weblogic.domainUID=$domainUID weblogic.domainName=$domainName
+  kubectl label configmap ${cmName} -n $namespace weblogic.domainUID=$domainUID weblogic.domainName=$domainName
 
   rm -rf $externalFilesTmpDir
 }
@@ -340,7 +180,8 @@ function createDomainHome {
   createDomainConfigmap
 
   # There is no way to re-run a kubernetes job, so first delete any prior job
-  JOB_NAME="${domainUID}-create-weblogic-sample-domain-job"
+  CONTAINER_NAME="create-weblogic-sample-domain-job"
+  JOB_NAME="${domainUID}-${CONTAINER_NAME}"
   deleteK8sObj job $JOB_NAME ${createJobOutput}
 
   echo Creating the domain by creating the job ${createJobOutput}
@@ -348,13 +189,13 @@ function createDomainHome {
 
   echo "Waiting for the job to complete..."
   JOB_STATUS="0"
-  max=20
+  max=30
   count=0
   while [ "$JOB_STATUS" != "Completed" -a $count -lt $max ] ; do
     sleep 30
     count=`expr $count + 1`
-    JOBS=`kubectl get pods --show-all -n ${namespace} | grep ${JOB_NAME}`
-    JOB_ERRORS=`kubectl logs jobs/$JOB_NAME -n ${namespace} | grep "ERROR:" `
+    JOBS=`kubectl get pods -n ${namespace} | grep ${JOB_NAME}`
+    JOB_ERRORS=`kubectl logs jobs/$JOB_NAME $CONTAINER_NAME -n ${namespace} | grep "ERROR:" `
     JOB_STATUS=`echo $JOBS | awk ' { print $3; } '`
     JOB_INFO=`echo $JOBS | awk ' { print "pod", $1, "status is", $3; } '`
     echo "status on iteration $count of $max"
@@ -376,17 +217,17 @@ function createDomainHome {
   if [ "$JOB_STATUS" != "Completed" ]; then
     echo "The create domain job is not showing status completed after waiting 300 seconds."
     echo "Check the log output for errors."
-    kubectl logs jobs/$JOB_NAME -n ${namespace}
+    kubectl logs jobs/$JOB_NAME $CONTAINER_NAME -n ${namespace}
     fail "Exiting due to failure - the job status is not Completed!"
   fi
 
   # Check for successful completion in log file
-  JOB_POD=`kubectl get pods --show-all -n ${namespace} | grep ${JOB_NAME} | awk ' { print $1; } '`
-  JOB_STS=`kubectl logs $JOB_POD -n ${namespace} | grep "Successfully Completed" | awk ' { print $1; } '`
+  JOB_POD=`kubectl get pods -n ${namespace} | grep ${JOB_NAME} | awk ' { print $1; } '`
+  JOB_STS=`kubectl logs $JOB_POD $CONTAINER_NAME -n ${namespace} | grep "Successfully Completed" | awk ' { print $1; } '`
   if [ "${JOB_STS}" != "Successfully" ]; then
     echo The log file for the create domain job does not contain a successful completion status
     echo Check the log output for errors
-    kubectl logs $JOB_POD -n ${namespace}
+    kubectl logs $JOB_POD $CONTAINER_NAME -n ${namespace}
     fail "Exiting due to failure - the job log file does not contain a successful completion status!"
   fi
 }
@@ -403,14 +244,13 @@ function printSummary {
   echo "Domain ${domainName} was created and will be started by the WebLogic Kubernetes Operator"
   echo ""
   if [ "${exposeAdminNodePort}" = true ]; then
-    echo "Administration console access is available at http:${K8S_IP}:${adminNodePort}/console"
+    echo "Administration console access is available at http://${K8S_IP}:${adminNodePort}/console"
   fi
   if [ "${exposeAdminT3Channel}" = true ]; then
-    echo "T3 access is available at t3:${K8S_IP}:${t3ChannelPort}"
+    echo "T3 access is available at t3://${K8S_IP}:${t3ChannelPort}"
   fi
   echo "The following files were generated:"
   echo "  ${domainOutputDir}/create-domain-inputs.yaml"
-  echo "  ${domainPVCOutput}"
   echo "  ${createJobOutput}"
   echo "  ${dcrOutput}"
   echo ""
@@ -418,5 +258,5 @@ function printSummary {
 }
 
 # Perform the sequence of steps to create a domain
-createDomain
+createDomain false
 

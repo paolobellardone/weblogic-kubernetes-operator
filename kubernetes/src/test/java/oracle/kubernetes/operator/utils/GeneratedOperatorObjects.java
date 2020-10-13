@@ -1,19 +1,18 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
-import io.kubernetes.client.models.ExtensionsV1beta1Deployment;
-import io.kubernetes.client.models.V1ClusterRole;
-import io.kubernetes.client.models.V1ClusterRoleBinding;
-import io.kubernetes.client.models.V1ConfigMap;
-import io.kubernetes.client.models.V1Namespace;
-import io.kubernetes.client.models.V1Role;
-import io.kubernetes.client.models.V1RoleBinding;
-import io.kubernetes.client.models.V1Secret;
-import io.kubernetes.client.models.V1Service;
-import io.kubernetes.client.models.V1ServiceAccount;
+import io.kubernetes.client.openapi.models.V1ClusterRole;
+import io.kubernetes.client.openapi.models.V1ClusterRoleBinding;
+import io.kubernetes.client.openapi.models.V1ConfigMap;
+import io.kubernetes.client.openapi.models.V1Deployment;
+import io.kubernetes.client.openapi.models.V1Namespace;
+import io.kubernetes.client.openapi.models.V1Role;
+import io.kubernetes.client.openapi.models.V1RoleBinding;
+import io.kubernetes.client.openapi.models.V1Secret;
+import io.kubernetes.client.openapi.models.V1Service;
+import io.kubernetes.client.openapi.models.V1ServiceAccount;
 
 /**
  * Generates the operator yaml files for a set of valid operator input params. Creates and managed
@@ -47,7 +46,7 @@ public class GeneratedOperatorObjects {
     return securityYaml.getOperatorNamespace();
   }
 
-  public ExtensionsV1beta1Deployment getOperatorDeployment() {
+  public V1Deployment getOperatorDeployment() {
     return operatorYaml.getOperatorDeployment();
   }
 
@@ -99,11 +98,11 @@ public class GeneratedOperatorObjects {
     return securityYaml.getWeblogicOperatorRoleBinding(namespace);
   }
 
-  public V1Role getWeblogicOperatorRole() {
-    return securityYaml.getWeblogicOperatorRole();
-  }
-
   public V1RoleBinding getWeblogicOperatorRoleBinding() {
     return securityYaml.getWeblogicOperatorRoleBinding();
+  }
+
+  public V1Role getWeblogicOperatorRole() {
+    return securityYaml.getWeblogicOperatorRole();
   }
 }

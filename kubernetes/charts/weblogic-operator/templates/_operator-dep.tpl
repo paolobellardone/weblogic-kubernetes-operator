@@ -1,26 +1,35 @@
-# Copyright 2018 Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 {{- define "operator.operatorDeployment" }}
 ---
-apiVersion: "apps/v1beta1"
+apiVersion: "apps/v1"
 kind: "Deployment"
 metadata:
   name: "weblogic-operator"
   namespace: {{ .Release.Namespace | quote }}
   labels:
-    weblogic.resourceVersion: "operator-v2"
     weblogic.operatorName: {{ .Release.Namespace | quote }}
 spec:
+  selector:
+    matchLabels:
+      weblogic.operatorName: {{ .Release.Namespace | quote }}
   replicas: 1
   template:
     metadata:
      labels:
-        weblogic.resourceVersion: "operator-v2"
         weblogic.operatorName: {{ .Release.Namespace | quote }}
         app: "weblogic-operator"
     spec:
       serviceAccountName: {{ .serviceAccount | quote }}
+      {{- with .nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: "weblogic-operator"
         image: {{ .image | quote }}
@@ -36,14 +45,33 @@ spec:
           value: "false"
         - name: "JAVA_LOGGING_LEVEL"
           value: {{ .javaLoggingLevel | quote }}
+        - name: ISTIO_ENABLED
+          value: {{ .istioEnabled | quote }}
         {{- if .remoteDebugNodePortEnabled }}
         - name: "REMOTE_DEBUG_PORT"
           value: {{ .internalDebugHttpPort | quote }}
+        - name: "DEBUG_SUSPEND"
+          {{- if .suspendOnDebugStartup }}
+          value: "y"
+          {{- else }}
+          value: "n"
+          {{- end }}
         {{- end }}
         {{- if .mockWLS }}
         - name: "MOCK_WLS"
           value: "true"
         {{- end }}
+        resources:
+          requests:
+            cpu: {{ .cpuRequests | default "250m" }}
+            memory: {{ .memoryRequests | default "512Mi" }}
+          limits:
+            {{- if .cpuLimits}}
+            cpu: {{ .cpuLimits }}
+            {{- end }}
+            {{- if .memoryLimits}}
+            memory: {{ .memoryLimits }}
+            {{- end }}
         volumeMounts:
         - name: "weblogic-operator-cm-volume"
           mountPath: "/operator/config"
@@ -57,13 +85,22 @@ spec:
           name: "log-dir"
           readOnly: false
         {{- end }}
+        {{- if not .remoteDebugNodePortEnabled }}
         livenessProbe:
           exec:
             command:
               - "bash"
               - "/operator/livenessProbe.sh"
-          initialDelaySeconds: 120
+          initialDelaySeconds: 20
           periodSeconds: 5
+        readinessProbe:
+          exec:
+            command:
+              - "bash"
+              - "/operator/readinessProbe.sh"
+          initialDelaySeconds: 2
+          periodSeconds: 10
+        {{- end }}
       {{- if .elkIntegrationEnabled }}
       - name: "logstash"
         image: {{ .logStashImage | quote }}

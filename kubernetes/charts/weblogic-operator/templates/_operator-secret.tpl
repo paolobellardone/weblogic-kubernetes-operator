@@ -1,18 +1,24 @@
-# Copyright 2018 Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 {{- define "operator.operatorSecrets" }}
 ---
 apiVersion: "v1"
 kind: "Secret"
 data:
-  {{- if .externalRestEnabled }}
+  {{- if (and .externalRestEnabled (hasKey . "externalOperatorKey")) }}
   externalOperatorKey: {{ .externalOperatorKey | quote }}
+  {{- end }}
+  {{- $secret := (lookup "v1" "Secret" .Release.Namespace "weblogic-operator-secrets") }}
+  {{- if $secret }}
+  {{- $internalOperatorKey := index $secret.data "internalOperatorKey" }}
+  {{- if $internalOperatorKey }}
+  internalOperatorKey: {{ $internalOperatorKey }}
+  {{- end }}
   {{- end }}
 metadata:
   labels:
     weblogic.operatorName: {{ .Release.Namespace | quote }}
-    weblogic.resourceVersion: "operator-v2"
   name: "weblogic-operator-secrets"
   namespace:  {{ .Release.Namespace | quote }}
 type: "Opaque"

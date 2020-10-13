@@ -1,18 +1,21 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.wlsconfig;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
 import oracle.kubernetes.operator.logging.MessageKeys;
+import org.apache.commons.lang3.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.HashCodeBuilder;
+import org.apache.commons.lang3.builder.ToStringBuilder;
 
 /**
- * Contains values from a WLS dynamic servers configuration, which configures a WLS dynamic cluster
+ * Contains values from a WLS dynamic servers configuration, which configures a WLS dynamic cluster.
  */
 public class WlsDynamicServersConfig {
 
@@ -22,6 +25,7 @@ public class WlsDynamicServersConfig {
   String serverTemplateName;
   Integer dynamicClusterSize;
   Integer maxDynamicClusterSize;
+  Integer minDynamicClusterSize;
   String serverNamePrefix;
   boolean calculatedListenPorts;
 
@@ -29,9 +33,45 @@ public class WlsDynamicServersConfig {
   String machineNameMatchExpression;
   List<WlsServerConfig> serverConfigs;
 
+  public WlsDynamicServersConfig() {
+  }
+
+  /**
+   * Constructor.
+   *
+   * @param dynamicClusterSize current size of the dynamic cluster
+   * @param maxDynamicClusterSize maximum size of the dynamic cluster
+   * @param minDynamicClusterSize minimum size of the dynamic cluster
+   * @param serverNamePrefix prefix for names of servers in this dynamic cluster
+   * @param calculatedListenPorts whether listen ports are fixed or calculated based on server index
+   * @param machineNameMatchExpression the expression is used when determining machines to use for
+   *     server assignments
+   * @param serverTemplate template of servers in the dynamic cluster
+   * @param serverConfigs List of WlsServerConfig containing configurations of dynamic servers that
+   *     corresponds to the current cluster size
+   */
+  public WlsDynamicServersConfig(
+      Integer dynamicClusterSize,
+      Integer maxDynamicClusterSize,
+      Integer minDynamicClusterSize,
+      String serverNamePrefix,
+      boolean calculatedListenPorts,
+      String machineNameMatchExpression,
+      WlsServerConfig serverTemplate,
+      List<WlsServerConfig> serverConfigs) {
+    this.dynamicClusterSize = dynamicClusterSize;
+    this.maxDynamicClusterSize = maxDynamicClusterSize;
+    this.minDynamicClusterSize = minDynamicClusterSize;
+    this.serverNamePrefix = serverNamePrefix;
+    this.calculatedListenPorts = calculatedListenPorts;
+    this.machineNameMatchExpression = machineNameMatchExpression;
+    this.serverTemplate = serverTemplate;
+    this.serverConfigs = serverConfigs;
+  }
+
   /**
    * Creates a WlsDynamicServersConfig object using an "dynamicServers" item parsed from JSON result
-   * from WLS REST call
+   * from WLS REST call.
    *
    * @param dynamicServerConfig Map containing "dynamicServers" item parsed from JSON result from
    *     WLS REST call
@@ -49,6 +89,7 @@ public class WlsDynamicServersConfig {
       String domainName) {
     Integer dynamicClusterSize = null;
     Integer maxDynamicClusterSize = null;
+    Integer minDynamicClusterSize = null;
     String serverNamePrefix = null;
     boolean calculatedListenPorts = false;
     String machineNameMatchExpression = null;
@@ -57,6 +98,7 @@ public class WlsDynamicServersConfig {
     if (dynamicServerConfig != null) {
       dynamicClusterSize = (Integer) dynamicServerConfig.get("dynamicClusterSize");
       maxDynamicClusterSize = (Integer) dynamicServerConfig.get("maxDynamicClusterSize");
+      minDynamicClusterSize = (Integer) dynamicServerConfig.get("minDynamicClusterSize");
       serverNamePrefix = (String) dynamicServerConfig.get("serverNamePrefix");
       calculatedListenPorts = (boolean) dynamicServerConfig.get("calculatedListenPorts");
       machineNameMatchExpression = (String) dynamicServerConfig.get("machineNameMatchExpression");
@@ -81,6 +123,7 @@ public class WlsDynamicServersConfig {
     return new WlsDynamicServersConfig(
         dynamicClusterSize,
         maxDynamicClusterSize,
+        minDynamicClusterSize,
         serverNamePrefix,
         calculatedListenPorts,
         machineNameMatchExpression,
@@ -88,41 +131,9 @@ public class WlsDynamicServersConfig {
         serverConfigs);
   }
 
-  public WlsDynamicServersConfig() {}
-
-  /**
-   * Constructor
-   *
-   * @param dynamicClusterSize current size of the dynamic cluster
-   * @param maxDynamicClusterSize maximum size of the dynamic cluster
-   * @param serverNamePrefix prefix for names of servers in this dynamic cluster
-   * @param calculatedListenPorts whether listen ports are fixed or calculated based on server index
-   * @param machineNameMatchExpression the expression is used when determining machines to use for
-   *     server assignments
-   * @param serverTemplate template of servers in the dynamic cluster
-   * @param serverConfigs List of WlsServerConfig containing configurations of dynamic servers that
-   *     corresponds to the current cluster size
-   */
-  public WlsDynamicServersConfig(
-      Integer dynamicClusterSize,
-      Integer maxDynamicClusterSize,
-      String serverNamePrefix,
-      boolean calculatedListenPorts,
-      String machineNameMatchExpression,
-      WlsServerConfig serverTemplate,
-      List<WlsServerConfig> serverConfigs) {
-    this.dynamicClusterSize = dynamicClusterSize;
-    this.maxDynamicClusterSize = maxDynamicClusterSize;
-    this.serverNamePrefix = serverNamePrefix;
-    this.calculatedListenPorts = calculatedListenPorts;
-    this.machineNameMatchExpression = machineNameMatchExpression;
-    this.serverTemplate = serverTemplate;
-    this.serverConfigs = serverConfigs;
-  }
-
   /**
    * Create a list of WlsServerConfig objects for dynamic servers that corresponds to the current
-   * cluster size
+   * cluster size.
    *
    * @param serverNames Names of the servers corresponding to the current cluster size
    * @param serverTemplate WlsServerConfig object containing template used for creating dynamic
@@ -161,60 +172,6 @@ public class WlsDynamicServersConfig {
   }
 
   /**
-   * Return current size of the dynamic cluster
-   *
-   * @return current size of the dynamic cluster
-   */
-  public Integer getDynamicClusterSize() {
-    return dynamicClusterSize;
-  }
-
-  public void setDynamicClusterSize(Integer dynamicClusterSize) {
-    this.dynamicClusterSize = dynamicClusterSize;
-  }
-
-  /**
-   * Return maximum size of the dynamic cluster
-   *
-   * @return maximum size of the dynamic cluster
-   */
-  public Integer getMaxDynamicClusterSize() {
-    return maxDynamicClusterSize;
-  }
-
-  public void setMaxDynamicClusterSize(Integer maxDynamicClusterSize) {
-    this.maxDynamicClusterSize = maxDynamicClusterSize;
-  }
-
-  /**
-   * Return the expression used in matching machine names assigned to dynamic servers
-   *
-   * @return the expression used in matching machine names assigned to dynamic servers
-   */
-  public String getMachineNameMatchExpression() {
-    return machineNameMatchExpression;
-  }
-
-  public void setMachineNameMatchExpression(String machineNameMatchExpression) {
-    this.machineNameMatchExpression = machineNameMatchExpression;
-  }
-
-  /**
-   * Return list of WlsServerConfig objects containing configurations of WLS dynamic server that can
-   * be started under the current cluster size
-   *
-   * @return A list of WlsServerConfig objects containing configurations of WLS dynamic server that
-   *     can be started under the current cluster size
-   */
-  public List<WlsServerConfig> getServerConfigs() {
-    return serverConfigs;
-  }
-
-  public void setServerConfigs(List<WlsServerConfig> serverConfigs) {
-    this.serverConfigs = serverConfigs;
-  }
-
-  /**
    * Helper method to extract the server template name from the Map obtained from parsing the
    * "dynamicServers" element from the REST result.
    *
@@ -237,7 +194,86 @@ public class WlsDynamicServersConfig {
   }
 
   /**
-   * Return the server template associated with this dynamic servers configuration
+   * Returns a String containing the fields that we are interested in from the dynamic servers
+   * configuration which will used in the payload to the REST call to WLS admin server.
+   *
+   * @return a String containing the fields that we are interested in from the dynamic servers
+   *     configuration which will used in the payload to the REST call to WLS admin server
+   */
+  static String getSearchFields() {
+    return "'serverTemplate', 'dynamicClusterSize', 'maxDynamicClusterSize', 'minDynamicClusterSize', "
+        + "'serverNamePrefix', 'calculatedListenPorts', 'dynamicServerNames', 'machineNameMatchExpression' ";
+  }
+
+  /**
+   * Return current size of the dynamic cluster.
+   *
+   * @return current size of the dynamic cluster
+   */
+  public Integer getDynamicClusterSize() {
+    return dynamicClusterSize;
+  }
+
+  public void setDynamicClusterSize(Integer dynamicClusterSize) {
+    this.dynamicClusterSize = dynamicClusterSize;
+  }
+
+  /**
+   * Return maximum size of the dynamic cluster.
+   *
+   * @return maximum size of the dynamic cluster
+   */
+  public Integer getMaxDynamicClusterSize() {
+    return maxDynamicClusterSize;
+  }
+
+  public void setMaxDynamicClusterSize(Integer maxDynamicClusterSize) {
+    this.maxDynamicClusterSize = maxDynamicClusterSize;
+  }
+
+  /**
+   * Return minimum size of the dynamic cluster.
+   *
+   * @return minimum size of the dynamic cluster
+   */
+  public Integer getMinDynamicClusterSize() {
+    return minDynamicClusterSize;
+  }
+
+  public void setMinDynamicClusterSize(Integer minDynamicClusterSize) {
+    this.minDynamicClusterSize = minDynamicClusterSize;
+  }
+
+  /**
+   * Return the expression used in matching machine names assigned to dynamic servers.
+   *
+   * @return the expression used in matching machine names assigned to dynamic servers
+   */
+  public String getMachineNameMatchExpression() {
+    return machineNameMatchExpression;
+  }
+
+  public void setMachineNameMatchExpression(String machineNameMatchExpression) {
+    this.machineNameMatchExpression = machineNameMatchExpression;
+  }
+
+  /**
+   * Return list of WlsServerConfig objects containing configurations of WLS dynamic server that can
+   * be started under the current cluster size.
+   *
+   * @return A list of WlsServerConfig objects containing configurations of WLS dynamic server that
+   *     can be started under the current cluster size
+   */
+  public List<WlsServerConfig> getServerConfigs() {
+    return serverConfigs;
+  }
+
+  public void setServerConfigs(List<WlsServerConfig> serverConfigs) {
+    this.serverConfigs = serverConfigs;
+  }
+
+  /**
+   * Return the server template associated with this dynamic servers configuration.
    *
    * @return The server template associated with this dynamic servers configuration
    */
@@ -281,6 +317,12 @@ public class WlsDynamicServersConfig {
     this.calculatedListenPorts = calculatedListenPorts;
   }
 
+  /**
+   * Generate the Dynamic Server configurations.
+   * @param serverTemplate name of the dynamic server template
+   * @param clusterName name of the cluster
+   * @param domainName name of the domain
+   */
   public void generateDynamicServerConfigs(
       WlsServerConfig serverTemplate, String clusterName, String domainName) {
     List<String> dynamicServerNames = generateDynamicServerNames();
@@ -297,35 +339,61 @@ public class WlsDynamicServersConfig {
     return serverNames;
   }
 
-  /**
-   * Returns a String containing the fields that we are interested in from the dynamic servers
-   * configuration which will used in the payload to the REST call to WLS admin server
-   *
-   * @return a String containing the fields that we are interested in from the dynamic servers
-   *     configuration which will used in the payload to the REST call to WLS admin server
-   */
-  static String getSearchFields() {
-    return "'serverTemplate', 'dynamicClusterSize', 'maxDynamicClusterSize', 'serverNamePrefix', 'calculatedListenPorts', 'dynamicServerNames', 'machineNameMatchExpression' ";
+  @Override
+  public String toString() {
+    return new ToStringBuilder(this)
+        .append("name", name)
+        .append("serverTemplateName", serverTemplateName)
+        .append("dynamicClusterSize", dynamicClusterSize)
+        .append("maxDynamicClusterSize", maxDynamicClusterSize)
+        .append("minDynamicClusterSize", minDynamicClusterSize)
+        .append("serverNamePrefix", serverNamePrefix)
+        .append("calculatedListenPorts", calculatedListenPorts)
+        .append("serverTemplate", serverTemplate)
+        .append("machineNameMatchExpression", machineNameMatchExpression)
+        .append("serverConfigs", serverConfigs)
+        .toString();
   }
 
   @Override
-  public String toString() {
-    return "WlsDynamicServersConfig{"
-        + "dynamicClusterSize="
-        + dynamicClusterSize
-        + ", maxDynamicClusterSize="
-        + maxDynamicClusterSize
-        + ", serverNamePrefix='"
-        + serverNamePrefix
-        + '\''
-        + ", calculatedListenPorts="
-        + calculatedListenPorts
-        + ", machineNameMatchExpression="
-        + machineNameMatchExpression
-        + ", serverTemplate="
-        + serverTemplate
-        + ", serverConfigs="
-        + serverConfigs
-        + '}';
+  public int hashCode() {
+    HashCodeBuilder builder =
+        new HashCodeBuilder()
+            .append(name)
+            .append(serverTemplateName)
+            .append(dynamicClusterSize)
+            .append(maxDynamicClusterSize)
+            .append(minDynamicClusterSize)
+            .append(serverNamePrefix)
+            .append(calculatedListenPorts)
+            .append(serverTemplate)
+            .append(machineNameMatchExpression)
+            .append(serverConfigs);
+    return builder.toHashCode();
+  }
+
+  @Override
+  public boolean equals(Object other) {
+    if (other == this) {
+      return true;
+    }
+    if (!(other instanceof WlsDynamicServersConfig)) {
+      return false;
+    }
+
+    WlsDynamicServersConfig rhs = ((WlsDynamicServersConfig) other);
+    EqualsBuilder builder =
+        new EqualsBuilder()
+            .append(name, rhs.name)
+            .append(serverTemplateName, rhs.serverTemplateName)
+            .append(dynamicClusterSize, rhs.dynamicClusterSize)
+            .append(maxDynamicClusterSize, rhs.maxDynamicClusterSize)
+            .append(minDynamicClusterSize, rhs.minDynamicClusterSize)
+            .append(serverNamePrefix, rhs.serverNamePrefix)
+            .append(calculatedListenPorts, rhs.calculatedListenPorts)
+            .append(serverTemplate, rhs.serverTemplate)
+            .append(machineNameMatchExpression, rhs.machineNameMatchExpression)
+            .append(serverConfigs, rhs.serverConfigs);
+    return builder.isEquals();
   }
 }

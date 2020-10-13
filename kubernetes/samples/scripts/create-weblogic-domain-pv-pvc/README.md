@@ -6,8 +6,7 @@ A PV and PVC can be shared by multiple WebLogic domains or dedicated to a partic
 
 ## Prerequisites
 
-Please read this guide before proceeding.
-* [Persistent Volumes](../../../../site/persistent-volumes.md)
+Please read the [Persistent Volumes](../../../../site/persistent-volumes.md) guide before proceeding.
 
 ## Using the scripts to create a PV and PVC  
 
@@ -53,11 +52,11 @@ The PV and PVC creation inputs can be customized by editing the `create-pv-pvc-i
 | `domainUID` | ID of the domain resource to which the generated PV and PVC will be dedicated. Leave it empty if the PV and PVC are going to be shared by multiple domains. | no default |
 | `namespace` | Kubernetes namespace to create the PVC. | `default` |
 | `baseName` | Base name of the PV and PVC. The generated PV and PVC will be `<baseName>-pv` and `<baseName>-pvc` respectively. | `weblogic-sample` |
-| `weblogicDomainStoragePath` | Physical path of the storage for the PV. | no default |
+| `weblogicDomainStoragePath` | Physical path of the storage for the PV.  When `weblogicDomainStorageType` is set to `HOST_PATH`, this value should be set the to path to the domain storage on the Kubernetes host.  When `weblogicDomainStorageType` is set to NFS, then `weblogicDomainStorageNFSServer` should be set to the IP address or name of the DNS server, and this value should be set to the exported path on that server.  Note that the path where the domain is mounted in the WebLogic containers is not affected by this setting, that is determined when you create your domain. | no default |
 | `weblogicDomainStorageReclaimPolicy` | Kubernetes PVC policy for the persistent storage. The valid values are: `Retain`, `Delete`, and `Recycle`. | `Retain` |
 | `weblogicDomainStorageSize` | Total storage allocated for the PVC. | `10Gi` |
 | `weblogicDomainStorageType` | Type of storage. Legal values are `NFS` and `HOST_PATH`. If using `NFS`, `weblogicDomainStorageNFSServer` must be specified. | `HOST_PATH` |
-| `weblogicDomainStorageNFSServer`| Name of the IP address of the NFS server. This setting only applies if `weblogicDomainStorateType` is `NFS`.  | no default |
+| `weblogicDomainStorageNFSServer`| Name or IP address of the NFS server. This setting only applies if `weblogicDomainStorateType` is `NFS`.  | no default |
 
 ## Shared versus dedicated PVC
 
@@ -74,16 +73,14 @@ The create script will verify that the PV and PVC were created, and will report 
 The content of the generated `weblogic-sample-pvc.yaml`:
 
 ```
-# Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
   name: weblogic-sample-pvc
   namespace: default
-  labels:
-    weblogic.resourceVersion: domain-v2
 
   storageClassName: weblogic-sample-storage-class
   accessModes:
@@ -95,16 +92,15 @@ metadata:
 
 The content of the generated `weblogic-sample-pv.yaml`:
 ```
-# Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: weblogic-sample-pv
-  labels:
-    weblogic.resourceVersion: domain-v2
-    # weblogic.domainUID:
+  # labels:
+  #   weblogic.domainUID:
 spec:
   storageClassName: weblogic-sample-storage-class
   capacity:
@@ -125,8 +121,8 @@ spec:
 The content of the generated `domain1-weblogic-sample-pvc.yaml` when `domainUID` is set to `domain1`:
 
 ```
-# Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -134,7 +130,6 @@ metadata:
   name: domain1-weblogic-sample-pvc
   namespace: default
   labels:
-    weblogic.resourceVersion: domain-v2
     weblogic.domainUID: domain1
 spec:
   storageClassName: domain1-weblogic-sample-storage-class
@@ -147,15 +142,14 @@ spec:
 
 The content of the generated `domain1-weblogic-sample-pv.yaml` when `domainUID` is set to `domain1`:
 ```
-# Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: domain1-weblogic-sample-pv
   labels:
-    weblogic.resourceVersion: domain-v2
     weblogic.domainUID: domain1
 spec:
   storageClassName: domain1-weblogic-sample-storage-class
@@ -179,7 +173,6 @@ should have the value `Bound`, indicating the that persistent volume has been cl
 ```
 $ kubectl describe pv weblogic-sample-pv
 Name:            weblogic-sample-pv
-Labels:          weblogic.resourceVersion=domain-v2
 Annotations:     pv.kubernetes.io/bound-by-controller=yes
 StorageClass:    weblogic-sample-storage-class
 Status:          Bound
@@ -205,7 +198,6 @@ Namespace:     default
 StorageClass:  weblogic-sample-storage-class
 Status:        Bound
 Volume:        weblogic-sample-pv
-Labels:        weblogic.resourceVersion=domain-v2
 Annotations:   pv.kubernetes.io/bind-completed=yes
                pv.kubernetes.io/bound-by-controller=yes
 Finalizers:    []
@@ -214,3 +206,16 @@ Access Modes:  RWX
 Events:        <none>
 
 ```
+
+## Troubleshooting
+
+* Message: `[ERROR] The weblogicDomainStoragePath parameter in kubernetes/samples/scripts/create-weblogic-domain-pv-pvc/create-pv-pvc-inputs.yaml is missing, null or empty`  
+Edit the file and set the value of the field.  This value must be a directory that is world writable.  
+Optionally, follow these steps to tighten permissions on the named directory after you run the sample the first time:
+
+  * Become the root user.
+  * `ls -nd $value-of-weblogicDomainStoragePath`
+    * Note the values of the third and fourth field of the output.
+  * `chown $third-field:$fourth-field $value-of-weblogicDomainStoragePath`
+  * `chmod 755 $value-of-weblogicDomainStoragePath`
+  * Return to your normal user ID.

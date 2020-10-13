@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 #
 # Description
 #  Common validation functions shared by all other scripts that process inputs properties.
@@ -177,6 +177,27 @@ function validateWeblogicImagePullPolicy {
 }
 
 #
+# Function to validate the fmwDomainType
+#
+function validateFmwDomainType {
+  if [ ! -z ${fmwDomainType} ]; then
+    case ${fmwDomainType} in
+      "JRF")
+      ;;
+      "RestrictedJRF")
+      ;;
+      *)
+        validationError "Invalid value for fmwDomainType: ${fmwDomainType}. Valid values are JRF or restrictedJRF."
+      ;;
+    esac
+  else
+    # Set the default
+    fmwDomainType="JRF"
+  fi
+  failIfValidationErrors
+}
+
+#
 # Function to validate the weblogic image pull secret name
 #
 function validateWeblogicImagePullSecretName {
@@ -226,24 +247,6 @@ function validateServerStartPolicy {
       ;;
       *)
         validationError "Invalid value for serverStartPolicy: ${serverStartPolicy}. Valid values are 'NEVER', 'ALWAYS', 'IF_NEEDED', and 'ADMIN_ONLY'."
-      ;;
-    esac
-  fi
-}
-
-#
-# Function to validate the cluster type value
-#
-function validateClusterType {
-  validateInputParamsSpecified clusterType
-  if [ ! -z "${clusterType}" ]; then
-    case ${clusterType} in
-      "CONFIGURED")
-      ;;
-      "DYNAMIC")
-      ;;
-      *)
-        validationError "Invalid value for clusterType: ${clusterType}. Valid values are 'CONFIGURED' and 'DYNAMIC'."
       ;;
     esac
   fi
@@ -334,13 +337,13 @@ function validateDomainSecret {
   failIfValidationErrors
 
   # Verify the secret contains a username
-  SECRET=`kubectl get secret ${weblogicCredentialsSecretName} -n ${namespace} -o jsonpath='{.data}'| grep username: | wc | awk ' { print $1; }'`
+  SECRET=`kubectl get secret ${weblogicCredentialsSecretName} -n ${namespace} -o jsonpath='{.data}' | tr -d '"' | grep username: | wc | awk ' { print $1; }'`
   if [ "${SECRET}" != "1" ]; then
     validationError "The domain secret ${weblogicCredentialsSecretName} in namespace ${namespace} does contain a username"
   fi
 
   # Verify the secret contains a password
-  SECRET=`kubectl get secret ${weblogicCredentialsSecretName} -n ${namespace} -o jsonpath='{.data}'| grep password: | wc | awk ' { print $1; }'`
+  SECRET=`kubectl get secret ${weblogicCredentialsSecretName} -n ${namespace} -o jsonpath='{.data}' | tr -d '"'| grep password: | wc | awk ' { print $1; }'`
   if [ "${SECRET}" != "1" ]; then
     validationError "The domain secret ${weblogicCredentialsSecretName} in namespace ${namespace} does contain a password"
   fi
@@ -360,7 +363,6 @@ function validateCommonInputs {
     clusterName \
     managedServerNameBase \
     namespace \
-    t3PublicAddress \
     includeServerOutInPodLog \
     version
 
@@ -388,10 +390,76 @@ function validateCommonInputs {
   validateClusterName
   validateWeblogicCredentialsSecretName
   validateServerStartPolicy
-  validateClusterType
   validateWeblogicImagePullPolicy
   validateWeblogicImagePullSecretName
+  validateFmwDomainType
+  # Below three validate methods are used for MII integration testing
+  validateWdtDomainType
+  validateWdtModelFile
+  validateWdtModelPropertiesFile
 
+  failIfValidationErrors
+}
+
+#
+# Function to validate the domain's persistent volume claim has been created
+#
+function validateDomainPVC {
+  # Check if the persistent volume claim is already available
+  checkPvcExists ${persistentVolumeClaimName} ${namespace}
+  if [ "${PVC_EXISTS}" = "false" ]; then
+    validationError "The domain persistent volume claim ${persistentVolumeClaimName} does not exist in namespace ${namespace}"
+  fi
+  failIfValidationErrors
+}
+
+#
+# Function to validate the WDT model file exists
+# used for MII integration testing
+#
+function validateWdtModelFile {
+  # Check if the model file exists
+  if [ ! -z $wdtModelFile ]; then
+    if [ ! -f $wdtModelFile ]; then
+      validationError "The WDT model file ${wdtModelFile} does not exist"
+    fi
+  fi
+  failIfValidationErrors
+}
+
+#
+# Function to validate the WDT model property file exists
+# used for MII integration testing
+#
+function validateWdtModelPropertiesFile {
+  # Check if the model property file exists
+  if [ ! -z $wdtModelPropertiesFile ]; then
+    if [ ! -f $wdtModelPropertiesFile ]; then
+      validationError "The WDT model property file ${wdtModelPropertiesFile} does not exist"
+    fi
+  fi
+  failIfValidationErrors
+}
+
+# Function to validate the wdtDomainType
+# used for MII integration testing
+function validateWdtDomainType {
+  if [ ! -z ${wdtDomainType} ]; then
+    case ${wdtDomainType} in
+      "WLS")
+      ;;
+      "JRF")
+      ;;
+      "RestrictedJRF")
+      ;;
+      *)
+        validationError "Invalid value for wdtDomainType: ${wdtDomainType}. Valid values are WLS or JRF or restrictedJRF."
+      ;;
+    esac
+  else
+    # Set the default
+    wdtDomainType="WLS"
+  fi
   failIfValidationErrors
 }
 

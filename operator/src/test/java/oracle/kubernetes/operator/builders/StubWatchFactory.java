@@ -1,15 +1,8 @@
-// Copyright 2018 Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.builders;
 
-import com.meterware.simplestub.Memento;
-import com.meterware.simplestub.StaticStubSupport;
-import com.squareup.okhttp.Call;
-import io.kubernetes.client.ApiClient;
-import io.kubernetes.client.util.Watch;
-import io.kubernetes.client.util.Watch.Response;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -19,6 +12,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 import javax.annotation.Nonnull;
+
+import com.meterware.simplestub.Memento;
+import com.meterware.simplestub.StaticStubSupport;
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.util.Watch;
+import io.kubernetes.client.util.Watch.Response;
+import okhttp3.Call;
 import oracle.kubernetes.operator.helpers.Pool;
 
 /**
@@ -36,6 +36,14 @@ public class StubWatchFactory implements WatchBuilder.WatchFactory {
   private List<List<Watch.Response<Object>>> calls = new ArrayList<>();
   private int numCloseCalls;
 
+  private StubWatchFactory() {
+  }
+
+  /**
+   * Setup static stub support.
+   * @return memento from StaticStubSupport install
+   * @throws NoSuchFieldException if StaticStubSupport fails to install.
+   */
   public static Memento install() throws NoSuchFieldException {
     factory = new StubWatchFactory();
     requestParameters = new ArrayList<>();
@@ -66,6 +74,10 @@ public class StubWatchFactory implements WatchBuilder.WatchFactory {
     return requestParameters;
   }
 
+  public static void throwExceptionOnNext(RuntimeException e) {
+    exceptionOnNext = e;
+  }
+
   @SuppressWarnings({"unchecked", "rawtypes"})
   @Override
   public <T> WatchI<T> createWatch(
@@ -77,14 +89,17 @@ public class StubWatchFactory implements WatchBuilder.WatchFactory {
       Map<String, String> recordedParams = recordedParams(callParams);
       addRecordedParameters(recordedParams);
 
-      if (nothingToDo()) return new WatchStub<>(Collections.emptyList());
-      else if (exceptionOnNext == null) return new WatchStub<T>((List) calls.remove(0));
-      else
+      if (nothingToDo()) {
+        return new WatchStub<>(Collections.emptyList());
+      } else if (exceptionOnNext == null) {
+        return new WatchStub<T>((List) calls.remove(0));
+      } else {
         try {
           return new ExceptionThrowingWatchStub<>(exceptionOnNext);
         } finally {
           exceptionOnNext = null;
         }
+      }
     } catch (IndexOutOfBoundsException e) {
       System.out.println("Failed in thread " + Thread.currentThread());
       throw e;
@@ -104,18 +119,14 @@ public class StubWatchFactory implements WatchBuilder.WatchFactory {
 
   private Map<String, String> recordedParams(CallParams callParams) {
     Map<String, String> result = new HashMap<>();
-    if (callParams.getResourceVersion() != null)
+    if (callParams.getResourceVersion() != null) {
       result.put("resourceVersion", callParams.getResourceVersion());
-    if (callParams.getLabelSelector() != null)
+    }
+    if (callParams.getLabelSelector() != null) {
       result.put("labelSelector", callParams.getLabelSelector());
+    }
 
     return result;
-  }
-
-  private StubWatchFactory() {}
-
-  public static void throwExceptionOnNext(RuntimeException e) {
-    exceptionOnNext = e;
   }
 
   public interface AllWatchesClosedListener {
@@ -134,7 +145,9 @@ public class StubWatchFactory implements WatchBuilder.WatchFactory {
     @Override
     public void close() {
       numCloseCalls++;
-      if (calls.size() == 0 && listener != null) listener.allWatchesClosed();
+      if (calls.size() == 0 && listener != null) {
+        listener.allWatchesClosed();
+      }
     }
 
     @Override

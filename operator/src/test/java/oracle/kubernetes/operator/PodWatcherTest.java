@@ -1,46 +1,77 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator;
 
+import java.math.BigInteger;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+
+import io.kubernetes.client.openapi.ApiException;
+import io.kubernetes.client.openapi.models.V1ContainerState;
+import io.kubernetes.client.openapi.models.V1ContainerStateTerminated;
+import io.kubernetes.client.openapi.models.V1ContainerStateWaiting;
+import io.kubernetes.client.openapi.models.V1ContainerStatus;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.openapi.models.V1PodCondition;
+import io.kubernetes.client.openapi.models.V1PodStatus;
+import io.kubernetes.client.util.Watch;
+import oracle.kubernetes.operator.builders.StubWatchFactory;
+import oracle.kubernetes.operator.builders.WatchEvent;
+import oracle.kubernetes.operator.helpers.KubernetesTestSupport;
+import oracle.kubernetes.operator.watcher.WatchListener;
+import oracle.kubernetes.operator.work.Step;
+import oracle.kubernetes.operator.work.TerminalStep;
+import org.hamcrest.Matchers;
+import org.junit.Before;
+import org.junit.Test;
+
 import static oracle.kubernetes.operator.LabelConstants.CREATEDBYOPERATOR_LABEL;
 import static oracle.kubernetes.operator.LabelConstants.DOMAINUID_LABEL;
-import static oracle.kubernetes.operator.LabelConstants.SERVERNAME_LABEL;
+import static oracle.kubernetes.operator.helpers.LegalNames.DOMAIN_INTROSPECTOR_JOB_SUFFIX;
+import static oracle.kubernetes.operator.logging.MessageKeys.INTROSPECTOR_POD_FAILED;
+import static oracle.kubernetes.utils.LogMatcher.containsInfo;
 import static org.hamcrest.Matchers.both;
-import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasEntry;
 import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.junit.MatcherAssert.assertThat;
-
-import com.google.common.collect.ImmutableMap;
-import io.kubernetes.client.models.V1ObjectMeta;
-import io.kubernetes.client.models.V1Pod;
-import io.kubernetes.client.models.V1PodCondition;
-import io.kubernetes.client.models.V1PodStatus;
-import io.kubernetes.client.util.Watch;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-import oracle.kubernetes.operator.builders.StubWatchFactory;
-import oracle.kubernetes.operator.watcher.WatchListener;
-import oracle.kubernetes.operator.work.NextAction;
-import oracle.kubernetes.operator.work.Packet;
-import oracle.kubernetes.operator.work.Step;
-import org.hamcrest.Matchers;
-import org.junit.Test;
 
 /** This test class verifies the behavior of the PodWatcher. */
 public class PodWatcherTest extends WatcherTestBase implements WatchListener<V1Pod> {
 
-  private static final int INITIAL_RESOURCE_VERSION = 234;
-  private Packet packet;
-  private V1Pod pod = new V1Pod().metadata(new V1ObjectMeta().name("test"));
+  private static final BigInteger INITIAL_RESOURCE_VERSION = new BigInteger("234");
+  private static final String NS = "ns";
+  private static final String NAME = "test";
+  private static final int RECHECK_SECONDS = 10;
+  private KubernetesTestSupport testSupport = new KubernetesTestSupport();
+  private final TerminalStep terminalStep = new TerminalStep();
+  private java.util.List<com.meterware.simplestub.Memento> mementos = new java.util.ArrayList<>();
+  private java.util.List<java.util.logging.LogRecord> logRecords = new java.util.ArrayList<>();
 
+  @Override
+  @Before
   public void setUp() throws Exception {
-    super.setUp();
-    packet = new Packet();
+    mementos.add(StubWatchFactory.install());
+    StubWatchFactory.setListener(this);
+    addMemento(testSupport.install());
+    mementos.add(
+        oracle.kubernetes.utils.TestUtils.silenceOperatorLogger()
+            .collectLogMessages(logRecords, getMessageKeys())
+            .withLogLevel(java.util.logging.Level.FINE)
+            .ignoringLoggedExceptions(ApiException.class));
+  }
+
+  private String[] getMessageKeys() {
+    return new String[] {
+        getPodFailedMessageKey()
+    };
+  }
+
+  private String getPodFailedMessageKey() {
+    return INTROSPECTOR_POD_FAILED;
   }
 
   @Override
@@ -54,7 +85,7 @@ public class PodWatcherTest extends WatcherTestBase implements WatchListener<V1P
 
     assertThat(
         StubWatchFactory.getRequestParameters().get(0),
-        both(hasEntry("resourceVersion", Integer.toString(INITIAL_RESOURCE_VERSION)))
+        both(hasEntry("resourceVersion", INITIAL_RESOURCE_VERSION.toString()))
             .and(hasEntry("labelSelector", asList(DOMAINUID_LABEL, CREATEDBYOPERATOR_LABEL))));
   }
 
@@ -69,141 +100,280 @@ public class PodWatcherTest extends WatcherTestBase implements WatchListener<V1P
   }
 
   @Override
-  protected PodWatcher createWatcher(String ns, AtomicBoolean stopping, int rv) {
-    return PodWatcher.create(this, ns, Integer.toString(rv), tuning, this, stopping);
+  protected PodWatcher createWatcher(String ns, AtomicBoolean stopping, BigInteger rv) {
+    return PodWatcher.create(this, ns, rv.toString(), tuning, this, stopping);
   }
 
-  @Test
-  public void whenPodHasNoStatus_reportNotReady() {
-    assertThat(PodWatcher.isReady(pod), is(false));
-  }
-
-  @Test
-  public void whenPodPhaseNotRunning_reportNotReady() {
-    pod.status(new V1PodStatus());
-
-    assertThat(PodWatcher.isReady(pod), is(false));
-  }
-
-  @Test
-  public void whenPodRunningButNoConditionsDefined_reportNotReady() {
-    pod.status(new V1PodStatus().phase("Running"));
-
-    assertThat(PodWatcher.isReady(pod), is(false));
-  }
-
-  @Test
-  public void whenPodRunningButNoReadyConditionsDefined_reportNotReady() {
-    List<V1PodCondition> conditions = Collections.singletonList(new V1PodCondition().type("Huge"));
-    pod.status(new V1PodStatus().phase("Running").conditions(conditions));
-
-    assertThat(PodWatcher.isReady(pod), is(false));
-  }
-
-  @Test
-  public void whenPodRunningButReadyConditionIsNotTrue_reportNotReady() {
-    List<V1PodCondition> conditions =
-        Collections.singletonList(new V1PodCondition().type("Ready").status("False"));
-    pod.status(new V1PodStatus().phase("Running").conditions(conditions));
-
-    assertThat(PodWatcher.isReady(pod), is(false));
-  }
-
-  @Test
-  public void whenPodRunningAndReadyConditionIsTrue_reportReady() {
-    makePodReady(pod);
-
-    assertThat(PodWatcher.isReady(pod), is(true));
-  }
-
-  private void makePodReady(V1Pod pod) {
-    List<V1PodCondition> conditions =
-        Collections.singletonList(new V1PodCondition().type("Ready").status("True"));
-    pod.status(new V1PodStatus().phase("Running").conditions(conditions));
-  }
-
-  @Test
-  public void whenPodHasNoStatus_reportNotFailed() {
-    assertThat(PodWatcher.isFailed(pod), is(false));
-  }
-
-  @Test
-  public void whenPodPhaseNotFailed_reportNotFailed() {
-    pod.status(new V1PodStatus().phase("Running"));
-
-    assertThat(PodWatcher.isFailed(pod), is(false));
-  }
-
-  @Test
-  public void whenPodPhaseIsFailed_reportFailed() {
-    pod.status(new V1PodStatus().phase("Failed"));
-
-    assertThat(PodWatcher.isFailed(pod), is(true));
-  }
-
-  @Test
-  public void whenPodHasNoDomainUid_returnNull() {
-    assertThat(PodWatcher.getPodDomainUID(pod), nullValue());
-  }
-
-  @Test
-  public void whenPodHasDomainUid_returnIt() {
-    pod.getMetadata().labels(ImmutableMap.of(DOMAINUID_LABEL, "domain1"));
-
-    assertThat(PodWatcher.getPodDomainUID(pod), equalTo("domain1"));
-  }
-
-  @Test
-  public void whenPodHasNoServerName_returnNull() {
-    assertThat(PodWatcher.getPodServerName(pod), nullValue());
-  }
-
-  @Test
-  public void whenPodHasServerName_returnIt() {
-    pod.getMetadata().labels(ImmutableMap.of(SERVERNAME_LABEL, "myserver"));
-
-    assertThat(PodWatcher.getPodServerName(pod), equalTo("myserver"));
+  private PodWatcher createWatcher(AtomicBoolean stopping) {
+    return PodWatcher.create(this, NS, INITIAL_RESOURCE_VERSION.toString(), tuning, this, stopping);
   }
 
   @Test
   public void waitForReady_returnsAStep() {
     AtomicBoolean stopping = new AtomicBoolean(true);
-    PodWatcher watcher =
-        PodWatcher.create(
-            this, "ns", Integer.toString(INITIAL_RESOURCE_VERSION), tuning, this, stopping);
+    PodWatcher watcher = createWatcher(stopping);
 
-    assertThat(watcher.waitForReady(pod, null), Matchers.instanceOf(Step.class));
+    assertThat(watcher.waitForReady(createPod(), null), Matchers.instanceOf(Step.class));
+  }
+
+  private V1Pod createPod() {
+    return new V1Pod().metadata(new V1ObjectMeta().namespace(NS).name(NAME));
+  }
+
+  private V1Pod createIntrospectorPod() {
+    return new V1Pod().metadata(new V1ObjectMeta().namespace(NS).name(NAME + DOMAIN_INTROSPECTOR_JOB_SUFFIX));
   }
 
   @Test
-  public void WhenWaitForReadyAppliedToReadyPod_performNextStep() {
+  public void whenPodInitiallyReady_waitForReadyProceedsImmediately() {
     AtomicBoolean stopping = new AtomicBoolean(false);
-    PodWatcher watcher =
-        PodWatcher.create(
-            this, "ns", Integer.toString(INITIAL_RESOURCE_VERSION), tuning, this, stopping);
+    PodWatcher watcher = createWatcher(stopping);
 
-    makePodReady(pod);
+    V1Pod pod = createPod();
+    markPodReady(pod);
 
-    ListeningTerminalStep listeningStep = new ListeningTerminalStep(stopping);
-    Step step = watcher.waitForReady(pod, listeningStep);
-    NextAction nextAction = step.apply(packet);
-    nextAction.getNext().apply(packet);
+    try {
+      testSupport.runSteps(watcher.waitForReady(pod, terminalStep));
 
-    assertThat(listeningStep.wasPerformed, is(true));
-  }
-
-  static class ListeningTerminalStep extends Step {
-    private boolean wasPerformed = false;
-
-    ListeningTerminalStep(AtomicBoolean stopping) {
-      super(null);
+      assertThat(terminalStep.wasRun(), is(true));
+    } finally {
       stopping.set(true);
     }
+  }
 
-    @Override
-    public NextAction apply(Packet packet) {
-      wasPerformed = true;
-      return doEnd(packet);
+  private V1Pod dontChangePod(V1Pod pod) {
+    return pod;
+  }
+
+  private V1Pod markPodReady(V1Pod pod) {
+    return pod.status(new V1PodStatus().phase("Running").addConditionsItem(createCondition("Ready")));
+  }
+
+  private V1Pod addContainerStateWaitingMessage(V1Pod pod) {
+    return pod.status(new V1PodStatus()
+        .containerStatuses(java.util.Collections.singletonList(
+            new V1ContainerStatus()
+                .ready(false)
+                .state(new V1ContainerState().waiting(
+                    new V1ContainerStateWaiting().message("Error"))))));
+  }
+
+  private V1Pod addContainerStateTerminatedReason(V1Pod pod) {
+    return pod.status(new V1PodStatus()
+        .containerStatuses(java.util.Collections.singletonList(
+            new V1ContainerStatus()
+                .ready(false)
+                .state(new V1ContainerState().terminated(
+                    new V1ContainerStateTerminated().reason("Error"))))));
+  }
+
+  @SuppressWarnings("SameParameterValue")
+  private V1PodCondition createCondition(String type) {
+    return new V1PodCondition().type(type).status("True");
+  }
+
+  @Test
+  public void whenPodReadyWhenWaitCreated_performNextStep() {
+    startWaitForReady(this::markPodReady);
+
+    assertThat(terminalStep.wasRun(), is(true));
+  }
+
+  @Test
+  public void whenPodNotReadyWhenWaitCreated_dontPerformNextStep() {
+    startWaitForReady(this::dontChangePod);
+
+    assertThat(terminalStep.wasRun(), is(false));
+  }
+
+  private void startWaitForReady(Function<V1Pod, V1Pod> modifier) {
+    AtomicBoolean stopping = new AtomicBoolean(false);
+    PodWatcher watcher = createWatcher(stopping);
+
+    testSupport.defineResources(modifier.apply(createPod()));
+
+    try {
+      testSupport.runSteps(watcher.waitForReady(createPod(), terminalStep));
+
+    } finally {
+      stopping.set(true);
     }
   }
+
+  @Test
+  public void whenPodReadyOnFirstRead_runNextStep() {
+    startWaitForReadyThenReadPod(this::markPodReady);
+
+    assertThat(terminalStep.wasRun(), is(true));
+  }
+
+  @Test
+  public void whenPodNotReadyOnFirstRead_dontRunNextStep() {
+    startWaitForReadyThenReadPod(this::dontChangePod);
+
+    assertThat(terminalStep.wasRun(), is(false));
+  }
+
+  private void startWaitForReadyThenReadPod(Function<V1Pod,V1Pod> modifier) {
+    AtomicBoolean stopping = new AtomicBoolean(false);
+    PodWatcher watcher = createWatcher(stopping);
+
+    V1Pod persistedPod = modifier.apply(createPod());
+    testSupport.defineResources(persistedPod);
+
+    try {
+      testSupport.runSteps(watcher.waitForReady(createPod(), terminalStep));
+    } finally {
+      stopping.set(true);
+    }
+  }
+
+  @Test
+  public void whenPodReadyLater_runNextStep() {
+    sendPodModifiedWatchAfterWaitForReady(this::markPodReady);
+
+    assertThat(terminalStep.wasRun(), is(true));
+  }
+
+  @Test
+  public void whenPodNotReadyLater_dontRunNextStep() {
+    sendPodModifiedWatchAfterWaitForReady(this::dontChangePod);
+
+    assertThat(terminalStep.wasRun(), is(false));
+  }
+
+  @Test
+  public void whenPodNotReadyLaterAndThenReady_runNextStep() {
+    sendPodModifiedWatchAfterWaitForReady(this::dontChangePod, this::markPodReady);
+
+    assertThat(terminalStep.wasRun(), is(true));
+  }
+
+  @Test
+  public void whenPodNotReadyLaterAndThenReadyButNoWatchEvent_runNextStep() {
+    makeModifiedPodReadyWithNoWatchEvent(this::markPodReady);
+
+    testSupport.setTime(RECHECK_SECONDS, TimeUnit.SECONDS);
+
+    assertThat(terminalStep.wasRun(), is(true));
+  }
+
+  @Test
+  public void whenIntrospectPodNotReadyWithTerminatedReason_logPodStatus() {
+    sendIntrospectorPodModifiedWatchAfterWaitForReady(this::addContainerStateTerminatedReason);
+
+    assertThat(terminalStep.wasRun(), is(false));
+    assertThat(logRecords, containsInfo(getPodFailedMessageKey()));
+  }
+
+  @Test
+  public void whenIntrospectPodNotReadyWithWaitingMessage_logPodStatus() {
+    sendIntrospectorPodModifiedWatchAfterWaitForReady(this::addContainerStateWaitingMessage);
+
+    assertThat(terminalStep.wasRun(), is(false));
+    assertThat(logRecords, containsInfo(getPodFailedMessageKey()));
+  }
+
+  // Starts the waitForReady step with an incomplete pod and sends a watch indicating that the pod has changed
+  @SafeVarargs
+  private void sendPodModifiedWatchAfterWaitForReady(Function<V1Pod,V1Pod>... modifiers) {
+    AtomicBoolean stopping = new AtomicBoolean(false);
+    PodWatcher watcher = createWatcher(stopping);
+    testSupport.defineResources(createPod());
+
+    try {
+      testSupport.runSteps(watcher.waitForReady(createPod(), terminalStep));
+      for (Function<V1Pod,V1Pod> modifier : modifiers) {
+        watcher.receivedResponse(new Watch.Response<>("MODIFIED", modifier.apply(createPod())));
+      }
+    } finally {
+      stopping.set(true);
+    }
+  }
+
+  // Simulates a pod that is ready but where Kubernetes has failed to send the watch event
+  @SafeVarargs
+  private void makeModifiedPodReadyWithNoWatchEvent(Function<V1Pod,V1Pod>... modifiers) {
+    AtomicBoolean stopping = new AtomicBoolean(false);
+    PodWatcher watcher = createWatcher(stopping);
+    V1Pod pod = createPod();
+    testSupport.defineResources(pod);
+
+    try {
+      testSupport.runSteps(watcher.waitForReady(createPod(), terminalStep));
+      for (Function<V1Pod,V1Pod> modifier : modifiers) {
+        modifier.apply(pod);
+      }
+    } finally {
+      stopping.set(true);
+    }
+  }
+
+  // Starts the waitForReady step with an incomplete pod and sends a watch indicating that the pod has changed
+  @SafeVarargs
+  private void sendIntrospectorPodModifiedWatchAfterWaitForReady(Function<V1Pod,V1Pod>... modifiers) {
+    AtomicBoolean stopping = new AtomicBoolean(false);
+    PodWatcher watcher = createWatcher(stopping);
+    testSupport.defineResources(createIntrospectorPod());
+
+    try {
+      testSupport.runSteps(watcher.waitForReady(createIntrospectorPod(), terminalStep));
+      for (Function<V1Pod,V1Pod> modifier : modifiers) {
+        watcher.receivedResponse(new Watch.Response<>("MODIFIED", modifier.apply(createIntrospectorPod())));
+      }
+    } finally {
+      stopping.set(true);
+    }
+  }
+
+  @Test
+  public void whenPodDeletedOnFirstRead_runNextStep() {
+    AtomicBoolean stopping = new AtomicBoolean(false);
+    PodWatcher watcher = createWatcher(stopping);
+
+    try {
+      testSupport.runSteps(watcher.waitForDelete(createPod(), terminalStep));
+
+      assertThat(terminalStep.wasRun(), is(true));
+    } finally {
+      stopping.set(true);
+    }
+  }
+
+  @Test
+  public void whenPodNotDeletedOnFirstRead_dontRunNextStep() {
+    AtomicBoolean stopping = new AtomicBoolean(false);
+    PodWatcher watcher = createWatcher(stopping);
+
+    testSupport.defineResources(createPod());
+    try {
+      testSupport.runSteps(watcher.waitForDelete(createPod(), terminalStep));
+
+      assertThat(terminalStep.wasRun(), is(false));
+    } finally {
+      stopping.set(true);
+    }
+  }
+
+  @Test
+  public void whenPodDeletedLater_runNextStep() {
+    AtomicBoolean stopping = new AtomicBoolean(false);
+    PodWatcher watcher = createWatcher(stopping);
+
+    testSupport.defineResources(createPod());
+
+    try {
+      testSupport.runSteps(watcher.waitForDelete(createPod(), terminalStep));
+      watcher.receivedResponse(new Watch.Response<>("DELETED", createPod()));
+
+      assertThat(terminalStep.wasRun(), is(true));
+    } finally {
+      stopping.set(true);
+    }
+  }
+
+  private Runnable reportPodIsNowDeleted(PodWatcher watcher) {
+    return () -> watcher.receivedResponse(WatchEvent.createDeleteEvent(createPod()).toWatchResponse());
+  }
+
 }

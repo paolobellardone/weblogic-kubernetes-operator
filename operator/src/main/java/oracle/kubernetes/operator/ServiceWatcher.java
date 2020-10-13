@@ -1,15 +1,13 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator;
 
-import io.kubernetes.client.ApiException;
-import io.kubernetes.client.models.V1ObjectMeta;
-import io.kubernetes.client.models.V1Service;
-import java.util.Map;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import io.kubernetes.client.openapi.ApiException;
+import io.kubernetes.client.openapi.models.V1Service;
 import oracle.kubernetes.operator.TuningParameters.WatchTuning;
 import oracle.kubernetes.operator.builders.WatchBuilder;
 import oracle.kubernetes.operator.builders.WatchI;
@@ -22,6 +20,26 @@ import oracle.kubernetes.operator.watcher.WatchListener;
 public class ServiceWatcher extends Watcher<V1Service> {
   private final String ns;
 
+  private ServiceWatcher(
+      String ns,
+      String initialResourceVersion,
+      WatchTuning tuning,
+      WatchListener<V1Service> listener,
+      AtomicBoolean isStopping) {
+    super(initialResourceVersion, tuning, isStopping, listener);
+    this.ns = ns;
+  }
+
+  /**
+   * Create service watcher.
+   * @param factory thread factory
+   * @param ns namespace
+   * @param initialResourceVersion initial resource version
+   * @param tuning tuning parameters
+   * @param listener listener
+   * @param isStopping stopping flag
+   * @return watcher
+   */
   public static ServiceWatcher create(
       ThreadFactory factory,
       String ns,
@@ -35,16 +53,6 @@ public class ServiceWatcher extends Watcher<V1Service> {
     return watcher;
   }
 
-  private ServiceWatcher(
-      String ns,
-      String initialResourceVersion,
-      WatchTuning tuning,
-      WatchListener<V1Service> listener,
-      AtomicBoolean isStopping) {
-    super(initialResourceVersion, tuning, isStopping, listener);
-    this.ns = ns;
-  }
-
   @Override
   public WatchI<V1Service> initiateWatch(WatchBuilder watchBuilder) throws ApiException {
     return watchBuilder
@@ -52,39 +60,8 @@ public class ServiceWatcher extends Watcher<V1Service> {
         .createServiceWatch(ns);
   }
 
-  static String getServiceDomainUID(V1Service service) {
-    V1ObjectMeta meta = service.getMetadata();
-    Map<String, String> labels = meta.getLabels();
-    if (labels != null) {
-      return labels.get(LabelConstants.DOMAINUID_LABEL);
-    }
-    return null;
-  }
-
-  static String getServiceServerName(V1Service service) {
-    V1ObjectMeta meta = service.getMetadata();
-    Map<String, String> labels = meta.getLabels();
-    if (labels != null) {
-      return labels.get(LabelConstants.SERVERNAME_LABEL);
-    }
-    return null;
-  }
-
-  static String getServiceChannelName(V1Service service) {
-    V1ObjectMeta meta = service.getMetadata();
-    Map<String, String> labels = meta.getLabels();
-    if (labels != null) {
-      return labels.get(LabelConstants.CHANNELNAME_LABEL);
-    }
-    return null;
-  }
-
-  static String getServiceClusterName(V1Service service) {
-    V1ObjectMeta meta = service.getMetadata();
-    Map<String, String> labels = meta.getLabels();
-    if (labels != null) {
-      return labels.get(LabelConstants.CLUSTERNAME_LABEL);
-    }
-    return null;
+  @Override
+  public String getNamespace() {
+    return ns;
   }
 }

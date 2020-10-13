@@ -1,15 +1,21 @@
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
+
 package oracle.kubernetes.operator;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadFactory;
 import javax.annotation.Nonnull;
+
 import org.junit.Rule;
 import org.junit.rules.TestRule;
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 
 public class ThreadFactoryTestBase implements ThreadFactory {
+  private List<Thread> threads = new ArrayList<>();
+  private String testName;
   @Rule
   public TestRule watcher =
       new TestWatcher() {
@@ -18,9 +24,6 @@ public class ThreadFactoryTestBase implements ThreadFactory {
           testName = description.getMethodName();
         }
       };
-
-  private List<Thread> threads = new ArrayList<>();
-  private String testName;
 
   @Override
   public Thread newThread(@Nonnull Runnable r) {
@@ -31,7 +34,9 @@ public class ThreadFactoryTestBase implements ThreadFactory {
   }
 
   void shutDownThreads() {
-    for (Thread thread : threads) shutDown(thread);
+    for (Thread thread : threads) {
+      shutDown(thread);
+    }
   }
 
   private void shutDown(Thread thread) {
@@ -39,6 +44,7 @@ public class ThreadFactoryTestBase implements ThreadFactory {
       thread.interrupt();
       thread.join();
     } catch (InterruptedException ignored) {
+      // no-op
     }
   }
 }

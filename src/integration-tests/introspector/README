@@ -1,5 +1,5 @@
-# Copyright 2018, Oracle Corporation and/or its affiliates. All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 ------------
 Description:
@@ -19,8 +19,11 @@ Usage:
     One way to do this when running locally is to run the integration tests.
     (Note that this test doesn't depend on Operator image as of 2018/10/16, but may in the future.)
 (2) Optionally specify values for input env vars (see introspectTest.sh for the list).
-(3) Run introspectTest.sh
-
+(3) For a non Model In Image domain type.
+        Run introspectTest.sh
+    For a Model In Image domain type.
+        export DOMAIN_SOURCE_TYPE=FromModel
+        Run introspectTest.sh
 -------------------
 Internal Test Flow:
 -------------------
@@ -33,38 +36,38 @@ Internal Test Flow:
 
    Cleanup files in /tmp/introspect
 
-() Cleanup test k8s artifacts and (optionally) an old created domain.
+() Cleanup test k8s artifacts and any old created domain.
 
-   <operator-src>/src/integration-tests/bash/cleanup.sh 
+   <operator-src>/src/integration-tests/bash/cleanup.sh
 
-() Create a test directory in the k8s cluster via a k8s pv, pvc, and a job.
+() Create a test directory in the k8s cluster via kubectl run.
 
-   create-test-root-pv.yamlt, create-test-root-pvc.yamlt
-   create-test-root.sh, create-test-root-job.yamlt
+   See createTestRoot.sh
 
-() Optionally deploy pv/pvc for use by introspector job, the optional domain create step, and wl pods.  (If PV_COMMENT != "#").
+() Deploy pv/pvc for use by introspector job pod, the domain create step, and wl pods.  (If PV_COMMENT != "#").
 
    wl-pv.yamlt, wl-pvc.yamlt
 
 () Deploy a secret for the admin credentials.
 
    wl-secret.yamlt
-                          
-() Optionally create a domain home.  (If CREATE_DOMAIN == "true").
 
-   wl-job.yamlt, createDomain.sh, createDomain.pyt
+() Create a domain home.
 
-() Run the introspector job.
+   wl-create-domain-pod.yamlt, wl-create-domain-pod.sh, wl-create-domain-pod.pyt
 
-   wl-job.yamlt
+() Run the introspector job pod (as a direct pod instead of a job)
+
+   wl-instrospect-pod.yamlt
+   wl-instrospect-pod.sh
    <operator-src>/operator/src/main/resources/scripts/introspectDomain.sh
    <operator-src>/operator/src/main/resources/scripts/startNodeManager.sh
    <operator-src>/operator/src/main/resources/scripts/introspectDomain.py
 
-() Parse the introspector job's output into files and deploy them in a configmap.
+() Parse the introspector job pod's output into files and deploy them in a configmap.
 
 () Start the admin server pod.   The startServer.sh and start-server.py
-   scripts will use files from the configmap for situational config and login 
+   scripts will use files from the configmap for situational config and login
    credentials.
 
    wl-pod.yamlt
@@ -76,7 +79,7 @@ Internal Test Flow:
    wl-nodeport-svc.yamlt
 
 () Start a managed server pod.   The startServer.sh and start-server.py
-   scripts will use files from the configmap for situational config and login 
+   scripts will use files from the configmap for situational config and login
    credentials.
 
    wl-pod.yamlt

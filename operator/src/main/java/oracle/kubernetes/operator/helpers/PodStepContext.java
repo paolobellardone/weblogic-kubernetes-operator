@@ -1,33 +1,65 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helpers;
 
-import static oracle.kubernetes.operator.LabelConstants.forDomainUid;
-import static oracle.kubernetes.operator.VersionConstants.DEFAULT_DOMAIN_VERSION;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import javax.json.Json;
+import javax.json.JsonPatchBuilder;
 
 import io.kubernetes.client.custom.IntOrString;
-import io.kubernetes.client.custom.Quantity;
-import io.kubernetes.client.models.*;
-import java.io.File;
-import java.util.*;
-import oracle.kubernetes.operator.*;
+import io.kubernetes.client.custom.V1Patch;
+import io.kubernetes.client.openapi.models.V1Container;
+import io.kubernetes.client.openapi.models.V1ContainerPort;
+import io.kubernetes.client.openapi.models.V1DeleteOptions;
+import io.kubernetes.client.openapi.models.V1EnvVar;
+import io.kubernetes.client.openapi.models.V1ExecAction;
+import io.kubernetes.client.openapi.models.V1HTTPGetAction;
+import io.kubernetes.client.openapi.models.V1Handler;
+import io.kubernetes.client.openapi.models.V1Lifecycle;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.openapi.models.V1PodReadinessGate;
+import io.kubernetes.client.openapi.models.V1PodSpec;
+import io.kubernetes.client.openapi.models.V1Probe;
+import io.kubernetes.client.openapi.models.V1SecretVolumeSource;
+import io.kubernetes.client.openapi.models.V1Status;
+import io.kubernetes.client.openapi.models.V1Volume;
+import io.kubernetes.client.openapi.models.V1VolumeMount;
+import oracle.kubernetes.operator.DomainSourceType;
+import oracle.kubernetes.operator.DomainStatusUpdater;
+import oracle.kubernetes.operator.IntrospectorConfigMapKeys;
+import oracle.kubernetes.operator.KubernetesConstants;
+import oracle.kubernetes.operator.LabelConstants;
+import oracle.kubernetes.operator.PodAwaiterStepFactory;
+import oracle.kubernetes.operator.ProcessingConstants;
+import oracle.kubernetes.operator.TuningParameters;
+import oracle.kubernetes.operator.WebLogicConstants;
 import oracle.kubernetes.operator.calls.CallResponse;
+import oracle.kubernetes.operator.calls.UnrecoverableErrorBuilder;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
 import oracle.kubernetes.operator.logging.MessageKeys;
-import oracle.kubernetes.operator.steps.DefaultResponseStep;
+import oracle.kubernetes.operator.wlsconfig.NetworkAccessPoint;
 import oracle.kubernetes.operator.wlsconfig.WlsDomainConfig;
+import oracle.kubernetes.operator.wlsconfig.WlsServerConfig;
 import oracle.kubernetes.operator.work.NextAction;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
-import oracle.kubernetes.weblogic.domain.v2.ServerSpec;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.ServerEnvVars;
+import oracle.kubernetes.weblogic.domain.model.ServerSpec;
+import oracle.kubernetes.weblogic.domain.model.Shutdown;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 
-@SuppressWarnings("deprecation")
-public abstract class PodStepContext implements StepContextConstants {
+public abstract class PodStepContext extends BasePodStepContext {
 
   private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
 
@@ -35,38 +67,37 @@ public abstract class PodStepContext implements StepContextConstants {
   private static final String START_SERVER = "/weblogic-operator/scripts/startServer.sh";
   private static final String LIVENESS_PROBE = "/weblogic-operator/scripts/livenessProbe.sh";
 
-  private static final String READINESS_PATH = "/weblogic";
+  private static final String READINESS_PATH = "/weblogic/ready";
 
-  private final DomainPresenceInfo info;
+  final WlsServerConfig scan;
   private final WlsDomainConfig domainTopology;
   private final Step conflictStep;
   private V1Pod podModel;
-  private Map<String, String> substitutionVariables = new HashMap<>();
+  private final String miiModelSecretsHash;
+  private final String miiDomainZipHash;
+  private final String domainRestartVersion;
 
   PodStepContext(Step conflictStep, Packet packet) {
+    super(packet.getSpi(DomainPresenceInfo.class));
     this.conflictStep = conflictStep;
-    info = packet.getSPI(DomainPresenceInfo.class);
     domainTopology = (WlsDomainConfig) packet.get(ProcessingConstants.DOMAIN_TOPOLOGY);
+    miiModelSecretsHash = (String)packet.get(IntrospectorConfigMapKeys.SECRETS_MD_5);
+    miiDomainZipHash = (String)packet.get(IntrospectorConfigMapKeys.DOMAINZIP_HASH);
+    domainRestartVersion = (String)packet.get(IntrospectorConfigMapKeys.DOMAIN_RESTART_VERSION);
+    scan = (WlsServerConfig) packet.get(ProcessingConstants.SERVER_SCAN);
+  }
+
+  private static boolean isCustomerItem(Map.Entry<String, String> entry) {
+    return !entry.getKey().startsWith("weblogic.");
   }
 
   void init() {
-    createSubstitutionMap();
     podModel = createPodModel();
   }
 
-  private void createSubstitutionMap() {
-    substitutionVariables.put("DOMAIN_NAME", getDomainName());
-    substitutionVariables.put("DOMAIN_HOME", getDomainHome());
-    substitutionVariables.put("SERVER_NAME", getServerName());
-    substitutionVariables.put("ADMIN_NAME", getAsName());
-    substitutionVariables.put("ADMIN_PORT", getAsPort().toString());
-  }
-
-  private V1Pod getPodModel() {
+  V1Pod getPodModel() {
     return podModel;
   }
-
-  abstract ServerSpec getServerSpec();
 
   private Step getConflictStep() {
     return new ConflictStep();
@@ -76,38 +107,14 @@ public abstract class PodStepContext implements StepContextConstants {
 
   abstract Map<String, String> getPodAnnotations();
 
-  private class ConflictStep extends Step {
-
-    @Override
-    public NextAction apply(Packet packet) {
-      return doNext(getConflictStep(), packet);
-    }
-
-    @Override
-    public boolean equals(Object other) {
-      if (other == this) {
-        return true;
-      }
-      if (!(other instanceof ConflictStep)) {
-        return false;
-      }
-      ConflictStep rhs = ((ConflictStep) other);
-      return new EqualsBuilder().append(conflictStep, rhs.getConflictStep()).isEquals();
-    }
-
-    private Step getConflictStep() {
-      return conflictStep;
-    }
-  }
-
-  // ------------------------ data methods ----------------------------
-
   String getNamespace() {
     return info.getNamespace();
   }
 
-  String getDomainUID() {
-    return getDomain().getDomainUID();
+  // ------------------------ data methods ----------------------------
+
+  String getDomainUid() {
+    return getDomain().getDomainUid();
   }
 
   Domain getDomain() {
@@ -118,12 +125,12 @@ public abstract class PodStepContext implements StepContextConstants {
     return domainTopology.getName();
   }
 
-  private String getDomainResourceName() {
-    return info.getDomain().getMetadata().getName();
+  private DomainSourceType getDomainHomeSourceType() {
+    return getDomain().getDomainHomeSourceType();
   }
 
   String getPodName() {
-    return LegalNames.toPodName(getDomainUID(), getServerName());
+    return LegalNames.toPodName(getDomainUid(), getServerName());
   }
 
   String getAsName() {
@@ -131,48 +138,126 @@ public abstract class PodStepContext implements StepContextConstants {
   }
 
   Integer getAsPort() {
-    return domainTopology.getServerConfig(domainTopology.getAdminServerName()).getListenPort();
+    return domainTopology
+        .getServerConfig(domainTopology.getAdminServerName())
+        .getLocalAdminProtocolChannelPort();
   }
 
-  private String getLogHome() {
-    return getDomain().getLogHome();
+  /**
+   * Check if the server is listening on a secure port. NOTE: If the targetted server is a managed
+   * server, this method is overridden to check if the managed server has a secure listen port rather
+   * than the admin server. See PodHelper.ManagedPodStepContext
+   *
+   * @return true if server is listening on a secure port
+   */
+  boolean isLocalAdminProtocolChannelSecure() {
+    return domainTopology
+        .getServerConfig(getServerName())
+        .isLocalAdminProtocolChannelSecure();
   }
 
-  protected boolean isDomainHomeInImage() {
-    return getDomain().isDomainHomeInImage();
+  /**
+   * Check if the admin server is listening on a secure port.
+   *
+   * @return true if admin server is listening on a secure port
+   */
+  private boolean isAdminServerProtocolChannelSecure() {
+    return domainTopology
+        .getServerConfig(domainTopology.getAdminServerName())
+        .isLocalAdminProtocolChannelSecure();
   }
 
-  String getEffectiveLogHome() {
-    if (!getDomain().getLogHomeEnabled()) return null;
-    String logHome = getLogHome();
-    if (logHome == null || "".equals(logHome.trim())) {
-      // logHome not specified, use default value
-      return DEFAULT_LOG_HOME + File.separator + getDomainUID();
-    }
-    return logHome;
+
+  Integer getLocalAdminProtocolChannelPort() {
+    return domainTopology
+        .getServerConfig(domainTopology.getAdminServerName())
+        .getLocalAdminProtocolChannelPort();
   }
 
-  private String getIncludeServerOutInPodLog() {
+  private String getDataHome() {
+    String dataHome = getDomain().getDataHome();
+    return dataHome != null && !dataHome.isEmpty() ? dataHome + File.separator + getDomainUid() : null;
+  }
+
+  private String getEffectiveLogHome() {
+    return getDomain().getEffectiveLogHome();
+  }
+
+  private String isIncludeServerOutInPodLog() {
     return Boolean.toString(getDomain().isIncludeServerOutInPodLog());
   }
 
-  abstract Integer getPort();
+  private String getRuntimeEncryptionSecret() {
+    return getDomain().getRuntimeEncryptionSecret();
+  }
+
+  private List<V1ContainerPort> getContainerPorts() {
+    if (scan != null) {
+      List<V1ContainerPort> ports = new ArrayList<>();
+      if (scan.getNetworkAccessPoints() != null) {
+        for (NetworkAccessPoint nap : scan.getNetworkAccessPoints()) {
+          String napName = nap.getName();
+          V1ContainerPort port =
+              new V1ContainerPort()
+                  .name(LegalNames.toDns1123LegalName(napName))
+                  .containerPort(nap.getListenPort())
+                  .protocol("TCP");
+          ports.add(port);
+        }
+      }
+      // Istio type is already passed from the introspector output, no need to create it again
+      if (!this.getDomain().isIstioEnabled()) {
+        if (scan.getListenPort() != null) {
+          String napName = "default";
+          ports.add(
+              new V1ContainerPort()
+                  .name(napName)
+                  .containerPort(scan.getListenPort())
+                  .protocol("TCP"));
+        }
+        if (scan.getSslListenPort() != null) {
+          String napName = "default-secure";
+          ports.add(
+              new V1ContainerPort()
+                  .name(napName)
+                  .containerPort(scan.getSslListenPort())
+                  .protocol("TCP"));
+        }
+        if (scan.getAdminPort() != null) {
+          String napName = "default-admin";
+          ports.add(
+              new V1ContainerPort()
+                  .name(napName)
+                  .containerPort(scan.getAdminPort())
+                  .protocol("TCP"));
+        }
+      }
+      return ports;
+    }
+    return null;
+  }
+
+  abstract Integer getDefaultPort();
 
   abstract String getServerName();
 
-  ServerKubernetesObjects getSko() {
-    return info.getServers().computeIfAbsent(getServerName(), k -> new ServerKubernetesObjects());
+  String getClusterName() {
+    return null;
+  }
+
+  // Prevent the watcher from recreating pod with old spec
+  private void markBeingDeleted() {
+    info.setServerPodBeingDeleted(getServerName(), Boolean.TRUE);
   }
 
   // ----------------------- step methods ------------------------------
 
-  // Prevent the watcher from recreating pod with old spec
-  private void clearRecord() {
-    setRecordedPod(null);
+  private void clearBeingDeleted() {
+    info.setServerPodBeingDeleted(getServerName(), Boolean.FALSE);
   }
 
   private void setRecordedPod(V1Pod pod) {
-    getSko().getPod().set(pod);
+    info.setServerPod(getServerName(), pod);
   }
 
   /**
@@ -193,7 +278,7 @@ public abstract class PodStepContext implements StepContextConstants {
    */
   private Step deletePod(Step next) {
     return new CallBuilder()
-        .deletePodAsync(getPodName(), getNamespace(), new V1DeleteOptions(), deleteResponse(next));
+          .deletePodAsync(getPodName(), getNamespace(), new V1DeleteOptions(), deleteResponse(next));
   }
 
   /**
@@ -211,7 +296,12 @@ public abstract class PodStepContext implements StepContextConstants {
    * @return a step to be scheduled.
    */
   Step createPod(Step next) {
-    return new CallBuilder().createPodAsync(getNamespace(), getPodModel(), createResponse(next));
+    clearBeingDeleted();
+    return createPodAsync(createResponse(next));
+  }
+
+  private Step createPodAsync(ResponseStep<V1Pod> response) {
+    return new CallBuilder().createPodAsync(getNamespace(), getPodModel(), response);
   }
 
   /**
@@ -229,24 +319,63 @@ public abstract class PodStepContext implements StepContextConstants {
    * @return a step to be scheduled.
    */
   private Step replacePod(Step next) {
-    return new CallBuilder().createPodAsync(getNamespace(), getPodModel(), replaceResponse(next));
+    return createPodAsync(replaceResponse(next));
+  }
+
+  /**
+   * Creates a Progressing step before an action step.
+   *
+   * @param actionStep the step to perform after the ProgressingStep.
+   * @return a step to be scheduled.
+   */
+  abstract Step createProgressingStep(Step actionStep);
+
+  private Step patchCurrentPod(V1Pod currentPod, Step next) {
+    return createProgressingStep(patchPod(currentPod, next));
+  }
+
+  protected Step patchPod(V1Pod currentPod, Step next) {
+    JsonPatchBuilder patchBuilder = Json.createPatchBuilder();
+
+    KubernetesUtils.addPatches(
+        patchBuilder, "/metadata/labels/", getLabels(currentPod), getPodLabels());
+    KubernetesUtils.addPatches(
+        patchBuilder, "/metadata/annotations/", getAnnotations(currentPod), getPodAnnotations());
+
+    return new CallBuilder()
+            .patchPodAsync(getPodName(), getNamespace(),
+            new V1Patch(patchBuilder.build().toString()), patchResponse(next));
+  }
+
+  private Map<String, String> getLabels(V1Pod pod) {
+    return Optional.ofNullable(pod.getMetadata()).map(V1ObjectMeta::getLabels).orElseGet(Collections::emptyMap);
+  }
+
+  private Map<String, String> getAnnotations(V1Pod pod) {
+    return Optional.ofNullable(pod.getMetadata()).map(V1ObjectMeta::getAnnotations).orElseGet(Collections::emptyMap);
   }
 
   private void logPodCreated() {
-    LOGGER.info(getPodCreatedMessageKey(), getDomainUID(), getServerName());
+    LOGGER.info(getPodCreatedMessageKey(), getDomainUid(), getServerName());
   }
 
   private void logPodExists() {
-    LOGGER.fine(getPodExistsMessageKey(), getDomainUID(), getServerName());
+    LOGGER.fine(getPodExistsMessageKey(), getDomainUid(), getServerName());
+  }
+
+  private void logPodPatched() {
+    LOGGER.info(getPodPatchedMessageKey(), getDomainUid(), getServerName());
   }
 
   private void logPodReplaced() {
-    LOGGER.info(getPodReplacedMessageKey(), getDomainUID(), getServerName());
+    LOGGER.info(getPodReplacedMessageKey(), getDomainUid(), getServerName());
   }
 
   abstract String getPodCreatedMessageKey();
 
   abstract String getPodExistsMessageKey();
+
+  abstract String getPodPatchedMessageKey();
 
   abstract String getPodReplacedMessageKey();
 
@@ -254,345 +383,140 @@ public abstract class PodStepContext implements StepContextConstants {
     return new CyclePodStep(next);
   }
 
-  private class CyclePodStep extends Step {
-
-    CyclePodStep(Step next) {
-      super(next);
-    }
-
-    @Override
-    public NextAction apply(Packet packet) {
-      clearRecord();
-      return doNext(deletePod(getNext()), packet);
-    }
+  private boolean mustPatchPod(V1Pod currentPod) {
+    return KubernetesUtils.isMissingValues(getLabels(currentPod), getPodLabels())
+        || KubernetesUtils.isMissingValues(getAnnotations(currentPod), getPodAnnotations());
   }
 
   private boolean canUseCurrentPod(V1Pod currentPod) {
-    return isCurrentPodValid(getPodModel(), currentPod);
-  }
-
-  // We want to detect changes that would require replacing an existing Pod
-  // however, we've also found that Pod.equals(Pod) isn't right because k8s
-  // returns fields, such as nodeName, even when export=true is specified.
-  // Therefore, we'll just compare specific fields
-  private static boolean isCurrentPodValid(V1Pod build, V1Pod current) {
-    List<String> ignoring = getVolumesToIgnore(current);
-
-    return isCurrentPodMetadataValid(build.getMetadata(), current.getMetadata())
-        && isCurrentPodSpecValid(build.getSpec(), current.getSpec(), ignoring);
-  }
-
-  private static boolean isCurrentPodMetadataValid(V1ObjectMeta build, V1ObjectMeta current) {
-    return VersionHelper.matchesResourceVersion(current, DEFAULT_DOMAIN_VERSION)
-        && isRestartVersionValid(build, current)
-        && KubernetesUtils.areLabelsValid(build, current)
-        && KubernetesUtils.areAnnotationsValid(build, current);
-  }
-
-  private static boolean isCurrentPodSpecValid(
-      V1PodSpec build, V1PodSpec current, List<String> ignoring) {
-    return Objects.equals(current.getSecurityContext(), build.getSecurityContext())
-        && KubernetesUtils.mapEquals(current.getNodeSelector(), build.getNodeSelector())
-        && equalSets(volumesWithout(current.getVolumes(), ignoring), build.getVolumes())
-        && equalSets(current.getImagePullSecrets(), build.getImagePullSecrets())
-        && areCompatible(build.getContainers(), current.getContainers(), ignoring);
-  }
-
-  private static boolean areCompatible(
-      List<V1Container> build, List<V1Container> current, List<String> ignoring) {
-    if (build != null) {
-      if (current == null) return false;
-
-      for (V1Container bc : build) {
-        V1Container fcc = getContainerWithName(current, bc.getName());
-        if (fcc == null || !isCompatible(bc, fcc, ignoring)) {
-          return false;
-        }
-      }
+    boolean useCurrent =
+        AnnotationHelper.getHash(getPodModel()).equals(AnnotationHelper.getHash(currentPod));
+    if (!useCurrent && AnnotationHelper.getDebugString(currentPod).length() > 0) {
+      LOGGER.fine(
+          MessageKeys.POD_DUMP,
+          AnnotationHelper.getDebugString(currentPod),
+          AnnotationHelper.getDebugString(getPodModel()));
     }
 
-    return true;
+    return useCurrent;
   }
 
-  /**
-   * Compares two pod spec containers for equality
-   *
-   * @param build the desired container model
-   * @param current the current container, obtained from Kubernetes
-   * @param ignoring a list of volume names to ignore
-   * @return true if the containers are considered equal
-   */
-  private static boolean isCompatible(
-      V1Container build, V1Container current, List<String> ignoring) {
-    return current.getImage().equals(build.getImage())
-        && current.getImagePullPolicy().equals(build.getImagePullPolicy())
-        && Objects.equals(current.getSecurityContext(), build.getSecurityContext())
-        && equalSettings(current.getLivenessProbe(), build.getLivenessProbe())
-        && equalSettings(current.getReadinessProbe(), build.getReadinessProbe())
-        && resourcesEqual(current.getResources(), build.getResources())
-        && equalSets(mountsWithout(current.getVolumeMounts(), ignoring), build.getVolumeMounts())
-        && equalSets(current.getPorts(), build.getPorts())
-        && equalSets(current.getEnv(), build.getEnv())
-        && equalSets(current.getEnvFrom(), build.getEnvFrom());
-  }
-
-  private static boolean equalSettings(V1Probe probe1, V1Probe probe2) {
-    return Objects.equals(probe1.getInitialDelaySeconds(), probe2.getInitialDelaySeconds())
-        && Objects.equals(probe1.getTimeoutSeconds(), probe2.getTimeoutSeconds())
-        && Objects.equals(probe1.getPeriodSeconds(), probe2.getPeriodSeconds());
-  }
-
-  private static boolean resourcesEqual(V1ResourceRequirements a, V1ResourceRequirements b) {
-    return KubernetesUtils.mapEquals(getLimits(a), getLimits(b))
-        && KubernetesUtils.mapEquals(getRequests(a), getRequests(b));
-  }
-
-  private static Map<String, Quantity> getLimits(V1ResourceRequirements requirements) {
-    return requirements == null ? Collections.emptyMap() : requirements.getLimits();
-  }
-
-  private static Map<String, Quantity> getRequests(V1ResourceRequirements requirements) {
-    return requirements == null ? Collections.emptyMap() : requirements.getRequests();
-  }
-
-  private static List<V1Volume> volumesWithout(
-      List<V1Volume> volumeMounts, List<String> volumesToIgnore) {
-    List<V1Volume> result = new ArrayList<>(volumeMounts);
-    for (Iterator<V1Volume> each = result.iterator(); each.hasNext(); )
-      if (volumesToIgnore.contains(each.next().getName())) each.remove();
-
-    return result;
-  }
-
-  private static List<V1VolumeMount> mountsWithout(
-      List<V1VolumeMount> volumeMounts, List<String> volumesToIgnore) {
-    List<V1VolumeMount> result = new ArrayList<>(volumeMounts);
-    for (Iterator<V1VolumeMount> each = result.iterator(); each.hasNext(); )
-      if (volumesToIgnore.contains(each.next().getName())) each.remove();
-
-    return result;
-  }
-
-  private static List<String> getVolumesToIgnore(V1Pod current) {
-    List<String> k8sVolumeNames = new ArrayList<>();
-    for (V1Container container : getContainers(current))
-      for (V1VolumeMount mount : getVolumeMounts(container))
-        if (PodDefaults.K8S_SERVICE_ACCOUNT_MOUNT_PATH.equals(mount.getMountPath()))
-          k8sVolumeNames.add(mount.getName());
-
-    return k8sVolumeNames;
-  }
-
-  private static List<V1Container> getContainers(V1Pod current) {
-    return Optional.ofNullable(current.getSpec().getContainers()).orElse(Collections.emptyList());
-  }
-
-  private static List<V1VolumeMount> getVolumeMounts(V1Container container) {
-    return Optional.ofNullable(container.getVolumeMounts()).orElse(Collections.emptyList());
-  }
-
-  private static boolean isRestartVersionValid(V1ObjectMeta build, V1ObjectMeta current) {
-    return isLabelSame(build, current, LabelConstants.DOMAINRESTARTVERSION_LABEL)
-        && isLabelSame(build, current, LabelConstants.CLUSTERRESTARTVERSION_LABEL)
-        && isLabelSame(build, current, LabelConstants.SERVERRESTARTVERSION_LABEL);
-  }
-
-  private static boolean isLabelSame(V1ObjectMeta build, V1ObjectMeta current, String labelName) {
-    return Objects.equals(build.getLabels().get(labelName), current.getLabels().get(labelName));
-  }
-
-  private static V1Container getContainerWithName(List<V1Container> containers, String name) {
-    for (V1Container cc : containers) {
-      if (cc.getName().equals(name)) {
-        return cc;
-      }
-    }
-    return null;
-  }
-
-  private static <T> boolean equalSets(List<T> first, List<T> second) {
-    if (first == second) return true;
-    return asSet(first).equals(asSet(second));
-  }
-
-  private static <T> Set<T> asSet(List<T> first) {
-    return (first == null) ? Collections.emptySet() : new HashSet<>(first);
-  }
-
-  private class VerifyPodStep extends Step {
-
-    VerifyPodStep(Step next) {
-      super(next);
-    }
-
-    @Override
-    public NextAction apply(Packet packet) {
-      V1Pod currentPod = getSko().getPod().get();
-      if (currentPod == null) {
-        return doNext(createNewPod(getNext()), packet);
-      } else if (canUseCurrentPod(currentPod)) {
-        logPodExists();
-        return doNext(packet);
-      } else {
-        LOGGER.info(MessageKeys.CYCLING_POD, currentPod, getPodModel());
-        return doNext(replaceCurrentPod(getNext()), packet);
-      }
-    }
+  private String getReasonToRecycle(V1Pod currentPod) {
+    PodCompatibility compatibility = new PodCompatibility(getPodModel(), currentPod);
+    return compatibility.getIncompatibility();
   }
 
   private ResponseStep<V1Pod> createResponse(Step next) {
     return new CreateResponseStep(next);
   }
 
-  private class CreateResponseStep extends ResponseStep<V1Pod> {
-    CreateResponseStep(Step next) {
-      super(next);
-    }
-
-    @Override
-    public NextAction onFailure(Packet packet, CallResponse<V1Pod> callResponse) {
-      return super.onFailure(getConflictStep(), packet, callResponse);
-    }
-
-    @Override
-    public NextAction onSuccess(Packet packet, CallResponse<V1Pod> callResponse) {
-      logPodCreated();
-      if (callResponse.getResult() != null) {
-        setRecordedPod(callResponse.getResult());
-      }
-      return doNext(packet);
-    }
-  }
-
   private ResponseStep<V1Status> deleteResponse(Step next) {
     return new DeleteResponseStep(next);
-  }
-
-  private class DeleteResponseStep extends ResponseStep<V1Status> {
-    DeleteResponseStep(Step next) {
-      super(next);
-    }
-
-    @Override
-    public NextAction onFailure(Packet packet, CallResponse<V1Status> callResponses) {
-      if (callResponses.getStatusCode() == CallBuilder.NOT_FOUND) {
-        return onSuccess(packet, callResponses);
-      }
-      return super.onFailure(getConflictStep(), packet, callResponses);
-    }
-
-    @Override
-    public NextAction onSuccess(Packet packet, CallResponse<V1Status> callResponses) {
-      return doNext(replacePod(getNext()), packet);
-    }
   }
 
   private ResponseStep<V1Pod> replaceResponse(Step next) {
     return new ReplacePodResponseStep(next);
   }
 
-  private class ReplacePodResponseStep extends ResponseStep<V1Pod> {
-    private final Step next;
+  private ResponseStep<V1Pod> patchResponse(Step next) {
+    return new PatchPodResponseStep(next);
+  }
 
-    ReplacePodResponseStep(Step next) {
-      super(next);
-      this.next = next;
+  V1Pod createPodModel() {
+    return withNonHashedElements(AnnotationHelper.withSha256Hash(createPodRecipe()));
+  }
+
+  @Override
+  protected Map<String, String> augmentSubVars(Map<String, String> vars) {
+    String clusterName = getClusterName();
+    if (clusterName != null) {
+      vars.put("CLUSTER_NAME", clusterName);
+    }
+    return vars;
+  }
+
+  V1Pod withNonHashedElements(V1Pod pod) {
+    V1ObjectMeta metadata = Objects.requireNonNull(pod.getMetadata());
+    // Adds labels and annotations to a pod, skipping any whose names begin with "weblogic."
+    getPodLabels().entrySet().stream()
+        .filter(PodStepContext::isCustomerItem)
+        .forEach(e -> metadata.putLabelsItem(e.getKey(), e.getValue()));
+    getPodAnnotations().entrySet().stream()
+        .filter(PodStepContext::isCustomerItem)
+        .forEach(e -> metadata.putAnnotationsItem(e.getKey(), e.getValue()));
+
+    setTerminationGracePeriod(pod);
+    getContainer(pod).map(V1Container::getEnv).ifPresent(this::updateEnv);
+
+    updateForOwnerReference(metadata);
+    return updateForDeepSubstitution(pod.getSpec(), pod);
+  }
+
+  private void setTerminationGracePeriod(V1Pod pod) {
+    Objects.requireNonNull(pod.getSpec()).terminationGracePeriodSeconds(getTerminationGracePeriodSeconds());
+  }
+
+  private long getTerminationGracePeriodSeconds() {
+    return getShutdownSpec().getTimeoutSeconds() + PodHelper.DEFAULT_ADDITIONAL_DELETE_TIME;
+  }
+
+  private void updateEnv(List<V1EnvVar> env) {
+    updateEnvForShutdown(env);
+    updateEnvForStartupMode(env);
+    defineConfigOverride(env);
+  }
+
+  private void updateEnvForShutdown(List<V1EnvVar> env) {
+    if (scan != null) {
+      Integer localAdminPort = scan.getLocalAdminProtocolChannelPort();
+      addOrReplaceEnvVar(env, "LOCAL_ADMIN_PORT", String.valueOf(localAdminPort));
+      addOrReplaceEnvVar(env, "LOCAL_ADMIN_PROTOCOL", localAdminPort.equals(scan.getListenPort()) ? "t3" : "t3s");
     }
 
-    @Override
-    public NextAction onFailure(Packet packet, CallResponse<V1Pod> callResponse) {
-      return super.onFailure(getConflictStep(), packet, callResponse);
-    }
+    Shutdown shutdown = getShutdownSpec();
+    addDefaultEnvVarIfMissing(env, "SHUTDOWN_TYPE", shutdown.getShutdownType());
+    addDefaultEnvVarIfMissing(env, "SHUTDOWN_TIMEOUT", String.valueOf(shutdown.getTimeoutSeconds()));
+    addDefaultEnvVarIfMissing(env, "SHUTDOWN_IGNORE_SESSIONS", String.valueOf(shutdown.getIgnoreSessions()));
+  }
 
-    @Override
-    public NextAction onSuccess(Packet packet, CallResponse<V1Pod> callResponse) {
+  private Shutdown getShutdownSpec() {
+    return Optional.ofNullable(getServerSpec()).map(ServerSpec::getShutdown).orElse(new Shutdown());
+  }
 
-      V1Pod newPod = callResponse.getResult();
-      logPodReplaced();
-      if (newPod != null) {
-        setRecordedPod(newPod);
-      }
+  private void updateEnvForStartupMode(List<V1EnvVar> env) {
+    Optional.ofNullable(getServerSpec())
+          .map(ServerSpec::getDesiredState)
+          .filter(this::isNotRunning)
+          .ifPresent(s -> addDefaultEnvVarIfMissing(env, "STARTUP_MODE", s));
+  }
 
-      PodAwaiterStepFactory pw = PodHelper.getPodAwaiterStepFactory(packet);
-      return doNext(pw.waitForReady(newPod, next), packet);
+  private boolean isNotRunning(String desiredState) {
+    return !WebLogicConstants.RUNNING_STATE.equals(desiredState);
+  }
+
+  private void defineConfigOverride(List<V1EnvVar> env) {
+    if (distributeOverridesDynamically()) {
+      addDefaultEnvVarIfMissing(env, ServerEnvVars.DYNAMIC_CONFIG_OVERRIDE, "true");
     }
   }
 
-  Step verifyPersistentVolume(Step next) {
-    return new VerifyPersistentVolumeStep(next);
-  }
-
-  private class VerifyPersistentVolumeStep extends Step {
-
-    VerifyPersistentVolumeStep(Step next) {
-      super(next);
-    }
-
-    @Override
-    public NextAction apply(Packet packet) {
-      String domainUID = getDomainUID();
-      Step list =
-          new CallBuilder()
-              .withLabelSelectors(forDomainUid(domainUID))
-              .listPersistentVolumeAsync(
-                  new DefaultResponseStep<V1PersistentVolumeList>(getNext()) {
-                    @Override
-                    public NextAction onSuccess(
-                        Packet packet,
-                        V1PersistentVolumeList result,
-                        int statusCode,
-                        Map<String, List<String>> responseHeaders) {
-                      if (result != null) {
-                        for (V1PersistentVolume pv : result.getItems()) {
-                          List<String> accessModes = pv.getSpec().getAccessModes();
-                          boolean foundAccessMode = false;
-                          for (String accessMode : accessModes) {
-                            if (accessMode.equals(READ_WRITE_MANY_ACCESS)) {
-                              foundAccessMode = true;
-                              break;
-                            }
-                          }
-
-                          // Persistent volume does not have ReadWriteMany access mode,
-                          if (!foundAccessMode) {
-                            LOGGER.warning(
-                                MessageKeys.PV_ACCESS_MODE_FAILED,
-                                pv.getMetadata().getName(),
-                                getDomainResourceName(),
-                                domainUID,
-                                READ_WRITE_MANY_ACCESS);
-                          }
-                        }
-                      } else {
-                        LOGGER.warning(
-                            MessageKeys.PV_NOT_FOUND_FOR_DOMAIN_UID,
-                            getDomainResourceName(),
-                            domainUID);
-                      }
-                      return doNext(packet);
-                    }
-                  });
-
-      return doNext(list, packet);
-    }
-  }
-
-  // ---------------------- model methods ------------------------------
-
-  private V1Pod createPodModel() {
+  // Creates a pod model containing elements which are not patchable.
+  private V1Pod createPodRecipe() {
     return new V1Pod().metadata(createMetadata()).spec(createSpec(TuningParameters.getInstance()));
   }
 
   protected V1ObjectMeta createMetadata() {
-    V1ObjectMeta metadata = new V1ObjectMeta().name(getPodName()).namespace(getNamespace());
-    // Add custom labels
-    getPodLabels().forEach(metadata::putLabelsItem);
+    final V1ObjectMeta metadata = new V1ObjectMeta().name(getPodName()).namespace(getNamespace());
 
-    // Add internal labels. This will overwrite any custom labels that conflict with internal
-    // labels.
+    LOGGER.finest("PodStepContext.createMetaData domainRestartVersion from INIT "
+        + domainRestartVersion);
+    LOGGER.finest("PodStepContext.createMetaData domainRestartVersion from serverspec "
+        + getServerSpec().getDomainRestartVersion());
+    LOGGER.finest("PodStepContext.createMetaData domainIntrospectVersion from spec "
+        + getDomain().getIntrospectVersion());
+    
     metadata
-        .putLabelsItem(LabelConstants.RESOURCE_VERSION_LABEL, DEFAULT_DOMAIN_VERSION)
-        .putLabelsItem(LabelConstants.DOMAINUID_LABEL, getDomainUID())
+        .putLabelsItem(LabelConstants.DOMAINUID_LABEL, getDomainUid())
         .putLabelsItem(LabelConstants.DOMAINNAME_LABEL, getDomainName())
         .putLabelsItem(LabelConstants.SERVERNAME_LABEL, getServerName())
         .putLabelsItem(LabelConstants.CREATEDBYOPERATOR_LABEL, "true")
@@ -603,136 +527,133 @@ public abstract class PodStepContext implements StepContextConstants {
         .putLabelsItem(
             LabelConstants.SERVERRESTARTVERSION_LABEL, getServerSpec().getServerRestartVersion());
 
-    // Add custom annotations
-    getPodAnnotations().forEach(metadata::putAnnotationsItem);
+    Optional.ofNullable(miiDomainZipHash)
+          .ifPresent(hash -> addHashLabel(metadata, LabelConstants.MODEL_IN_IMAGE_DOMAINZIP_HASH, hash));
+    Optional.ofNullable(miiModelSecretsHash)
+          .ifPresent(hash -> addHashLabel(metadata, LabelConstants.MODEL_IN_IMAGE_MODEL_SECRETS_HASH, hash));
 
     // Add prometheus annotations. This will overwrite any custom annotations with same name.
-    AnnotationHelper.annotateForPrometheus(metadata, getPort());
+    AnnotationHelper.annotateForPrometheus(metadata, getDefaultPort());
     return metadata;
   }
 
+  private void addHashLabel(V1ObjectMeta metadata, String label, String hash) {
+    metadata.putLabelsItem(label, formatHashLabel(hash));
+  }
+
+  private static String formatHashLabel(String hash) {
+    return String.format("md5.%s.md5", hash.replace("\n", ""));
+  }
+
+
   protected V1PodSpec createSpec(TuningParameters tuningParameters) {
-    V1PodSpec podSpec =
-        new V1PodSpec()
-            .addContainersItem(
-                createContainer(tuningParameters)
-                    .resources(getServerSpec().getResources())
-                    .securityContext(getServerSpec().getContainerSecurityContext()))
-            .nodeSelector(getServerSpec().getNodeSelectors())
-            .securityContext(getServerSpec().getPodSecurityContext());
+    V1PodSpec podSpec = createPodSpec(tuningParameters)
+        .readinessGates(getReadinessGates())
+        .initContainers(getServerSpec().getInitContainers());
 
-    podSpec.setImagePullSecrets(getServerSpec().getImagePullSecrets());
-
-    for (V1Volume additionalVolume : getVolumes(getDomainUID())) {
+    for (V1Volume additionalVolume : getVolumes(getDomainUid())) {
       podSpec.addVolumesItem(additionalVolume);
     }
-
     return podSpec;
   }
 
-  private List<V1Volume> getVolumes(String domainUID) {
-    List<V1Volume> volumes = PodDefaults.getStandardVolumes(domainUID);
+  // ---------------------- model methods ------------------------------
+
+  private List<V1PodReadinessGate> getReadinessGates() {
+    List<V1PodReadinessGate> readinessGates = getServerSpec().getReadinessGates();
+    return readinessGates.isEmpty() ? null : readinessGates;
+  }
+
+  private List<V1Volume> getVolumes(String domainUid) {
+    List<V1Volume> volumes = PodDefaults.getStandardVolumes(domainUid);
     volumes.addAll(getServerSpec().getAdditionalVolumes());
+    if (getDomainHomeSourceType() == DomainSourceType.FromModel) {
+      volumes.add(createRuntimeEncryptionSecretVolume());
+    }
+
     return volumes;
   }
 
-  private V1Container createContainer(TuningParameters tuningParameters) {
-    V1Container v1Container =
-        new V1Container()
-            .name(KubernetesConstants.CONTAINER_NAME)
-            .image(getImageName())
-            .imagePullPolicy(getImagePullPolicy())
-            .command(getContainerCommand())
-            .env(getEnvironmentVariables(tuningParameters))
-            .addPortsItem(new V1ContainerPort().containerPort(getPort()).protocol("TCP"))
+  protected V1Container createContainer(TuningParameters tuningParameters) {
+    V1Container v1Container = super.createContainer(tuningParameters)
+            .ports(getContainerPorts())
             .lifecycle(createLifecycle())
             .livenessProbe(createLivenessProbe(tuningParameters.getPodTuning()));
 
-    if (!mockWLS()) {
+    if (!mockWls()) {
       v1Container.readinessProbe(createReadinessProbe(tuningParameters.getPodTuning()));
     }
 
     for (V1VolumeMount additionalVolumeMount : getVolumeMounts()) {
       v1Container.addVolumeMountsItem(additionalVolumeMount);
     }
-
     return v1Container;
   }
 
-  private String getImageName() {
-    return getServerSpec().getImage();
+  private V1VolumeMount createRuntimeEncryptionSecretVolumeMount() {
+    return new V1VolumeMount().name(RUNTIME_ENCRYPTION_SECRET_VOLUME)
+        .mountPath(RUNTIME_ENCRYPTION_SECRET_MOUNT_PATH).readOnly(true);
   }
 
-  String getImagePullPolicy() {
-    return getServerSpec().getImagePullPolicy();
+  protected String getContainerName() {
+    return KubernetesConstants.CONTAINER_NAME;
   }
 
   protected List<String> getContainerCommand() {
     return Collections.singletonList(START_SERVER);
   }
 
-  abstract List<V1EnvVar> getEnvironmentVariables(TuningParameters tuningParameters);
+  protected List<V1Container> getContainers() {
+    return getServerSpec().getContainers();
+  }
 
   private List<V1VolumeMount> getVolumeMounts() {
-    List<V1VolumeMount> mounts = PodDefaults.getStandardVolumeMounts(getDomainUID());
+    List<V1VolumeMount> mounts = PodDefaults.getStandardVolumeMounts(getDomainUid());
     mounts.addAll(getServerSpec().getAdditionalVolumeMounts());
+    if (getDomainHomeSourceType() == DomainSourceType.FromModel) {
+      mounts.add(createRuntimeEncryptionSecretVolumeMount());
+    }
     return mounts;
   }
 
-  void overrideContainerWeblogicEnvVars(List<V1EnvVar> vars) {
-    // Override the domain name, domain directory, admin server name and admin server port.
-    addEnvVar(vars, "DOMAIN_NAME", getDomainName());
-    addEnvVar(vars, "DOMAIN_HOME", getDomainHome());
-    addEnvVar(vars, "ADMIN_NAME", getAsName());
-    addEnvVar(vars, "ADMIN_PORT", getAsPort().toString());
-    addEnvVar(vars, "SERVER_NAME", getServerName());
-    addEnvVar(vars, "DOMAIN_UID", getDomainUID());
-    addEnvVar(vars, "NODEMGR_HOME", NODEMGR_HOME);
-    addEnvVar(vars, "LOG_HOME", getEffectiveLogHome());
-    addEnvVar(vars, "SERVER_OUT_IN_POD_LOG", getIncludeServerOutInPodLog());
-    addEnvVar(
-        vars, "SERVICE_NAME", LegalNames.toServerServiceName(getDomainUID(), getServerName()));
-    addEnvVar(vars, "AS_SERVICE_NAME", LegalNames.toServerServiceName(getDomainUID(), getAsName()));
-    if (mockWLS()) {
-      addEnvVar(vars, "MOCK_WLS", "true");
-    }
-    hideAdminUserCredentials(vars);
+  private V1Volume createRuntimeEncryptionSecretVolume() {
+    return new V1Volume()
+        .name(RUNTIME_ENCRYPTION_SECRET_VOLUME)
+        .secret(getRuntimeEncryptionSecretVolumeSource(getRuntimeEncryptionSecret()));
+  }
+
+  private V1SecretVolumeSource getRuntimeEncryptionSecretVolumeSource(String name) {
+    return new V1SecretVolumeSource().secretName(name).defaultMode(420);
+  }
+
+  /**
+   * Sets the environment variables used by operator/src/main/resources/scripts/startServer.sh
+   * @param vars a list to which new variables are to be added
+   */
+  void addStartupEnvVars(List<V1EnvVar> vars) {
+    addEnvVar(vars, ServerEnvVars.DOMAIN_NAME, getDomainName());
+    addEnvVar(vars, ServerEnvVars.DOMAIN_HOME, getDomainHome());
+    addEnvVar(vars, ServerEnvVars.ADMIN_NAME, getAsName());
+    addEnvVar(vars, ServerEnvVars.ADMIN_PORT, getAsPort().toString());
+    addEnvVarIfTrue(isLocalAdminProtocolChannelSecure(), vars, "ADMIN_PORT_SECURE");
+    addEnvVarIfTrue(isAdminServerProtocolChannelSecure(), vars, ServerEnvVars.ADMIN_SERVER_PORT_SECURE);
+    addEnvVar(vars, ServerEnvVars.SERVER_NAME, getServerName());
+    addEnvVar(vars, ServerEnvVars.DOMAIN_UID, getDomainUid());
+    addEnvVar(vars, ServerEnvVars.NODEMGR_HOME, NODEMGR_HOME);
+    addEnvVar(vars, ServerEnvVars.LOG_HOME, getEffectiveLogHome());
+    addEnvVar(vars, ServerEnvVars.SERVER_OUT_IN_POD_LOG, isIncludeServerOutInPodLog());
+    addEnvVar(vars, ServerEnvVars.SERVICE_NAME, LegalNames.toServerServiceName(getDomainUid(), getServerName()));
+    addEnvVar(vars, ServerEnvVars.AS_SERVICE_NAME, LegalNames.toServerServiceName(getDomainUid(), getAsName()));
+    Optional.ofNullable(getDataHome()).ifPresent(v -> addEnvVar(vars, ServerEnvVars.DATA_HOME, v));
+    addEnvVarIfTrue(mockWls(), vars, "MOCK_WLS");
   }
 
   private String getDomainHome() {
     return getDomain().getDomainHome();
   }
 
-  // Hide the admin account's user name and password.
-  // Note: need to use null v.s. "" since if you upload a "" to kubectl then download it,
-  // it comes back as a null and V1EnvVar.equals returns false even though it's supposed to
-  // be the same value.
-  // Regardless, the pod ends up with an empty string as the value (v.s. thinking that
-  // the environment variable hasn't been set), so it honors the value (instead of using
-  // the default, e.g. 'weblogic' for the user name).
-  private static void hideAdminUserCredentials(List<V1EnvVar> vars) {
-    addEnvVar(vars, "ADMIN_USERNAME", null);
-    addEnvVar(vars, "ADMIN_PASSWORD", null);
-  }
-
-  static void addEnvVar(List<V1EnvVar> vars, String name, String value) {
-    vars.add(new V1EnvVar().name(name).value(value));
-  }
-
-  void doSubstitution(List<V1EnvVar> vars) {
-    for (V1EnvVar var : vars) {
-      var.setValue(translate(var.getValue()));
-    }
-  }
-
-  private String translate(String rawValue) {
-    String result = rawValue;
-    for (Map.Entry<String, String> entry : substitutionVariables.entrySet()) {
-      if (result != null && entry.getValue() != null) {
-        result = result.replace(String.format("$(%s)", entry.getKey()), entry.getValue());
-      }
-    }
-    return result;
+  private boolean distributeOverridesDynamically() {
+    return getDomain().distributeOverridesDynamically();
   }
 
   private V1Lifecycle createLifecycle() {
@@ -753,15 +674,34 @@ public abstract class PodStepContext implements StepContextConstants {
         .initialDelaySeconds(getReadinessProbeInitialDelaySeconds(tuning))
         .timeoutSeconds(getReadinessProbeTimeoutSeconds(tuning))
         .periodSeconds(getReadinessProbePeriodSeconds(tuning))
-        .failureThreshold(FAILURE_THRESHOLD)
-        .httpGet(httpGetAction(READINESS_PATH, getPort()));
+        .failureThreshold(FAILURE_THRESHOLD);
+    try {
+      boolean istioEnabled = getDomain().isIstioEnabled();
+      if (istioEnabled) {
+        int istioReadinessPort = getDomain().getIstioReadinessPort();
+        readinessProbe =
+            readinessProbe.httpGet(httpGetAction(READINESS_PATH, istioReadinessPort, false));
+      } else {
+        readinessProbe =
+            readinessProbe.httpGet(
+                httpGetAction(
+                    READINESS_PATH,
+                    getLocalAdminProtocolChannelPort(),
+                    isLocalAdminProtocolChannelSecure()));
+      }
+    } catch (Exception e) {
+      // do nothing
+    }
     return readinessProbe;
   }
 
   @SuppressWarnings("SameParameterValue")
-  private V1HTTPGetAction httpGetAction(String path, int port) {
+  private V1HTTPGetAction httpGetAction(String path, int port, boolean useHttps) {
     V1HTTPGetAction getAction = new V1HTTPGetAction();
     getAction.path(path).port(new IntOrString(port));
+    if (useHttps) {
+      getAction.scheme("HTTPS");
+    }
     return getAction;
   }
 
@@ -804,7 +744,197 @@ public abstract class PodStepContext implements StepContextConstants {
         .orElse(tuning.livenessProbePeriodSeconds);
   }
 
-  private boolean mockWLS() {
+  private boolean mockWls() {
     return Boolean.getBoolean("mockWLS");
   }
+
+  private abstract class BaseStep extends Step {
+    BaseStep() {
+      this(null);
+    }
+
+    BaseStep(Step next) {
+      super(next);
+    }
+
+    protected String getDetail() {
+      return getServerName();
+    }
+  }
+
+  private class ConflictStep extends BaseStep {
+
+    @Override
+    public NextAction apply(Packet packet) {
+      return doNext(getConflictStep(), packet);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (other == this) {
+        return true;
+      }
+      if (!(other instanceof ConflictStep)) {
+        return false;
+      }
+      ConflictStep rhs = ((ConflictStep) other);
+      return new EqualsBuilder().append(conflictStep, rhs.getConflictStep()).isEquals();
+    }
+
+    private Step getConflictStep() {
+      return conflictStep;
+    }
+  }
+
+  private class CyclePodStep extends BaseStep {
+
+    CyclePodStep(Step next) {
+      super(next);
+    }
+
+    @Override
+    public NextAction apply(Packet packet) {
+      markBeingDeleted();
+      return doNext(deletePod(getNext()), packet);
+    }
+  }
+
+  private class VerifyPodStep extends BaseStep {
+
+    VerifyPodStep(Step next) {
+      super(next);
+    }
+
+    @Override
+    public NextAction apply(Packet packet) {
+      V1Pod currentPod = info.getServerPod(getServerName());
+      if (currentPod == null) {
+        return doNext(createNewPod(getNext()), packet);
+      } else if (!canUseCurrentPod(currentPod)) {
+        LOGGER.info(
+            MessageKeys.CYCLING_POD,
+            Objects.requireNonNull(currentPod.getMetadata()).getName(),
+            getReasonToRecycle(currentPod));
+        return doNext(replaceCurrentPod(getNext()), packet);
+      } else if (mustPatchPod(currentPod)) {
+        return doNext(patchCurrentPod(currentPod, getNext()), packet);
+      } else {
+        logPodExists();
+        return doNext(packet);
+      }
+    }
+  }
+
+  private abstract class BaseResponseStep extends ResponseStep<V1Pod> {
+    BaseResponseStep(Step next) {
+      super(next);
+    }
+
+    protected String getDetail() {
+      return getServerName();
+    }
+
+    @Override
+    public NextAction onFailure(Packet packet, CallResponse<V1Pod> callResponse) {
+      if (UnrecoverableErrorBuilder.isAsyncCallFailure(callResponse)) {
+        return updateDomainStatus(packet, callResponse);
+      } else {
+        return onFailure(getConflictStep(), packet, callResponse);
+      }
+    }
+
+    private NextAction updateDomainStatus(Packet packet, CallResponse<V1Pod> callResponse) {
+      return doNext(DomainStatusUpdater.createFailedStep(callResponse, null), packet);
+    }
+  }
+
+  private class CreateResponseStep extends BaseResponseStep {
+
+    CreateResponseStep(Step next) {
+      super(next);
+    }
+
+    @Override
+    public NextAction onSuccess(Packet packet, CallResponse<V1Pod> callResponse) {
+      logPodCreated();
+      if (callResponse.getResult() != null) {
+        info.updateLastKnownServerStatus(getServerName(), WebLogicConstants.STARTING_STATE);
+        setRecordedPod(callResponse.getResult());
+      }
+
+      boolean waitForPodReady =
+          (boolean) Optional.ofNullable(packet.get(ProcessingConstants.WAIT_FOR_POD_READY)).orElse(false);
+
+      if (waitForPodReady) {
+        PodAwaiterStepFactory pw = packet.getSpi(PodAwaiterStepFactory.class);
+        return doNext(pw.waitForReady(callResponse.getResult(), getNext()), packet);
+      }
+      return doNext(packet);
+    }
+  }
+
+  private class DeleteResponseStep extends ResponseStep<V1Status> {
+    DeleteResponseStep(Step next) {
+      super(next);
+    }
+
+    protected String getDetail() {
+      return getServerName();
+    }
+
+    @Override
+    public NextAction onFailure(Packet packet, CallResponse<V1Status> callResponses) {
+      if (callResponses.getStatusCode() == CallBuilder.NOT_FOUND) {
+        return onSuccess(packet, callResponses);
+      }
+      return super.onFailure(getConflictStep(), packet, callResponses);
+    }
+
+    @Override
+    public NextAction onSuccess(Packet packet, CallResponse<V1Status> callResponses) {
+      return doNext(replacePod(getNext()), packet);
+    }
+  }
+
+  private class ReplacePodResponseStep extends BaseResponseStep {
+
+    ReplacePodResponseStep(Step next) {
+      super(next);
+    }
+
+    @Override
+    public NextAction onSuccess(Packet packet, CallResponse<V1Pod> callResponse) {
+
+      V1Pod newPod = callResponse.getResult();
+      logPodReplaced();
+      if (newPod != null) {
+        setRecordedPod(newPod);
+      }
+
+      PodAwaiterStepFactory pw = packet.getSpi(PodAwaiterStepFactory.class);
+      return doNext(pw.waitForReady(newPod, getNext()), packet);
+    }
+  }
+
+  private class PatchPodResponseStep extends BaseResponseStep {
+    private final Step next;
+
+    PatchPodResponseStep(Step next) {
+      super(next);
+      this.next = next;
+    }
+
+    @Override
+    public NextAction onSuccess(Packet packet, CallResponse<V1Pod> callResponse) {
+
+      V1Pod newPod = callResponse.getResult();
+      logPodPatched();
+      if (newPod != null) {
+        setRecordedPod(newPod);
+      }
+
+      return doNext(next, packet);
+    }
+  }
+
 }

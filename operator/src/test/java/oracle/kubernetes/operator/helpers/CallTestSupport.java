@@ -1,22 +1,20 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helpers;
 
-import com.meterware.simplestub.Memento;
-import com.meterware.simplestub.StaticStubSupport;
-import io.kubernetes.client.ApiClient;
-import io.kubernetes.client.ApiException;
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
+
+import com.meterware.simplestub.Memento;
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.ApiException;
 import oracle.kubernetes.operator.calls.CallResponse;
 import oracle.kubernetes.operator.calls.RequestParams;
 import oracle.kubernetes.operator.calls.SynchronousCallDispatcher;
@@ -38,16 +36,48 @@ import oracle.kubernetes.operator.calls.SynchronousCallFactory;
  * specified name and namespace.
  *
  * <p>testSupport.createCannedResponse("readCRD") .withName(name) .returning(new
- * V1beta1CustomResourceDefinition());
+ * V1CustomResourceDefinition());
  *
  * <p>will return the specified custom resource definition.
  */
-public class CallTestSupport {
+class CallTestSupport {
+
+  private static RequestParams REQUEST_PARAMS
+      = new RequestParams("testcall", "junit", "testName", "body");
 
   private Map<CallTestSupport.CannedResponse, Boolean> cannedResponses = new HashMap<>();
 
-  public Memento installSynchronousCallDispatcher() throws NoSuchFieldException {
-    return StaticStubSupport.install(CallBuilder.class, "DISPATCHER", new CallDispatcherStub());
+  private static String toString(RequestParams requestParams, AdditionalParams additionalParams) {
+    return new ErrorFormatter(requestParams.call)
+        .addDescriptor("namespace", requestParams.namespace)
+        .addDescriptor("name", requestParams.name)
+        .addDescriptor("fieldSelector", additionalParams.getFieldSelector())
+        .addDescriptor("labelSelector", additionalParams.getLabelSelector())
+        .addDescriptor("body", requestParams.body)
+        .toString();
+  }
+
+  Memento installSynchronousCallDispatcher() {
+    return new Memento() {
+      private SynchronousCallDispatcher originalCallDispatcher;
+
+      {
+        {
+          originalCallDispatcher = CallBuilder.setCallDispatcher(new CallDispatcherStub());
+        }
+      }
+
+      @Override
+      public void revert() {
+        CallBuilder.resetCallDispatcher();
+      }
+
+      @SuppressWarnings("unchecked")
+      @Override
+      public <T> T getOriginalValue() {
+        return (T) originalCallDispatcher;
+      }
+    };
   }
 
   /**
@@ -57,7 +87,7 @@ public class CallTestSupport {
    * @return a canned response which may be qualified by parameters and defines how CallBuilder
    *     should react.
    */
-  public CannedResponse createCannedResponse(String forMethod) {
+  CannedResponse createCannedResponse(String forMethod) {
     CannedResponse cannedResponse = new CannedResponse(forMethod);
     this.cannedResponses.put(cannedResponse, false);
     return cannedResponse;
@@ -70,23 +100,29 @@ public class CallTestSupport {
    * @return a canned response which may be qualified by parameters and defines how CallBuilder
    *     should react.
    */
-  public CannedResponse createOptionalCannedResponse(String forMethod) {
+  CannedResponse createOptionalCannedResponse(String forMethod) {
     CannedResponse cannedResponse = new CannedResponse(forMethod).optional();
     this.cannedResponses.put(cannedResponse, false);
     return cannedResponse;
   }
 
   /** Throws an exception if any of the canned responses were not used. */
-  public void verifyAllDefinedResponsesInvoked() {
+  void verifyAllDefinedResponsesInvoked() {
     List<CannedResponse> unusedResponses = new ArrayList<>();
-    for (CannedResponse cannedResponse : this.cannedResponses.keySet())
-      if (isUnused(cannedResponse)) unusedResponses.add(cannedResponse);
+    for (CannedResponse cannedResponse : this.cannedResponses.keySet()) {
+      if (isUnused(cannedResponse)) {
+        unusedResponses.add(cannedResponse);
+      }
+    }
 
-    if (unusedResponses.isEmpty()) return;
+    if (unusedResponses.isEmpty()) {
+      return;
+    }
 
     StringBuilder sb = new StringBuilder("The following expected calls were not made:\n");
-    for (CannedResponse cannedResponse : unusedResponses)
+    for (CannedResponse cannedResponse : unusedResponses) {
       sb.append("  ").append(cannedResponse).append('\n');
+    }
 
     throw new AssertionError(sb.toString());
   }
@@ -95,12 +131,14 @@ public class CallTestSupport {
     return !cannedResponse.optional && !cannedResponses.get(cannedResponse);
   }
 
-  @SuppressWarnings("unchecked")
   CannedResponse getMatchingResponse(
       RequestParams requestParams, String fieldSelector, String labelSelector) {
     AdditionalParams params = new AdditionalParams(fieldSelector, labelSelector);
-    for (CannedResponse cannedResponse : this.cannedResponses.keySet())
-      if (cannedResponse.matches(requestParams, params)) return afterMarking(cannedResponse);
+    for (CannedResponse cannedResponse : this.cannedResponses.keySet()) {
+      if (cannedResponse.matches(requestParams, params)) {
+        return afterMarking(cannedResponse);
+      }
+    }
 
     throw new AssertionError("Unexpected request for " + toString(requestParams, params));
   }
@@ -135,15 +173,22 @@ public class CallTestSupport {
       this.methodName = methodName;
     }
 
-    private Object getResult(RequestParams requestParams) {
-      return function == null ? result : function.apply(requestParams);
+    private Object getResult(RequestParams requestParams) throws ApiException {
+      if (function != null) {
+        return function.apply(requestParams);
+      }
+      if (status > 0) {
+        throw new ApiException(status, "");
+      }
+      return result;
     }
 
     CallResponse getCallResponse() {
-      if (result == null)
-        return new CallResponse<>(null, new ApiException(), status, Collections.emptyMap());
-      else
-        return new CallResponse<>(result, null, HttpURLConnection.HTTP_OK, Collections.emptyMap());
+      if (result == null) {
+        return CallResponse.createFailure(REQUEST_PARAMS, new ApiException(), status);
+      } else {
+        return CallResponse.createSuccess(REQUEST_PARAMS, result, HttpURLConnection.HTTP_OK);
+      }
     }
 
     boolean matches(@Nonnull RequestParams requestParams, AdditionalParams params) {
@@ -157,19 +202,19 @@ public class CallTestSupport {
           && matchesBody(requestParams.body, requestParamExpectations.get(BODY));
     }
 
+    private boolean matches(AdditionalParams params) {
+      return Objects.equals(params.fieldSelector, requestParamExpectations.get(FIELD_SELECTOR))
+          && Objects.equals(params.labelSelector, requestParamExpectations.get(LABEL_SELECTOR));
+    }
+
     private boolean matchesBody(Object actualBody, Object expectedBody) {
       return expectedBody instanceof BodyMatcher && ((BodyMatcher) expectedBody).matches(actualBody)
           || Objects.equals(actualBody, expectedBody)
           || function != null;
     }
 
-    private boolean matches(AdditionalParams params) {
-      return Objects.equals(params.fieldSelector, requestParamExpectations.get(FIELD_SELECTOR))
-          && Objects.equals(params.labelSelector, requestParamExpectations.get(LABEL_SELECTOR));
-    }
-
     /**
-     * Qualifies the canned response to be used only if the namespace matches the value specified
+     * Qualifies the canned response to be used only if the namespace matches the value specified.
      *
      * @param namespace the expected namespace
      * @return the updated response
@@ -180,7 +225,7 @@ public class CallTestSupport {
     }
 
     /**
-     * Qualifies the canned response to be used only if the name matches the value specified
+     * Qualifies the canned response to be used only if the name matches the value specified.
      *
      * @param name the expected name
      * @return the updated response
@@ -190,34 +235,23 @@ public class CallTestSupport {
       return this;
     }
 
-    /**
-     * Qualifies the canned response to be used only if the UID matches the value specified
-     *
-     * @param uid the expected domain uid
-     * @return the updated response
-     */
-    public CannedResponse withUid(String uid) {
-      requestParamExpectations.put(NAME, uid);
-      return this;
-    }
-
     private CannedResponse optional() {
       optional = true;
       return this;
     }
 
     /**
-     * Qualifies the canned response to be used for any body value
+     * Qualifies the canned response to be used for any body value.
      *
      * @return the updated response
      */
-    public CannedResponse ignoringBody() {
+    CannedResponse ignoringBody() {
       requestParamExpectations.put(BODY, WILD_CARD);
       return this;
     }
 
     /**
-     * Qualifies the canned response to be used only if the body matches the value specified
+     * Qualifies the canned response to be used only if the body matches the value specified.
      *
      * @param body the expected body
      * @return the updated response
@@ -227,22 +261,12 @@ public class CallTestSupport {
       return this;
     }
 
-    public CannedResponse withLabelSelectors(String... selectors) {
-      requestParamExpectations.put(LABEL_SELECTOR, String.join(",", selectors));
-      return this;
-    }
-
-    public CannedResponse withFieldSelector(String fieldSelector) {
-      requestParamExpectations.put(FIELD_SELECTOR, fieldSelector);
-      return this;
-    }
-
     /**
      * Specifies a function to compute the result from the request parameters.
      *
      * @param function the specified function
      */
-    public void computingResult(Function<RequestParams, Object> function) {
+    void computingResult(Function<RequestParams, Object> function) {
       this.function = function;
     }
 
@@ -260,15 +284,16 @@ public class CallTestSupport {
      *
      * @param status the failure status
      */
-    public void failingWithStatus(int status) {
+    void failingWithStatus(int status) {
       this.status = status;
     }
 
     @Override
     public String toString() {
       ErrorFormatter formatter = new ErrorFormatter(methodName);
-      for (Map.Entry<String, Object> entry : requestParamExpectations.entrySet())
+      for (Map.Entry<String, Object> entry : requestParamExpectations.entrySet()) {
         formatter.addDescriptor(entry.getKey(), entry.getValue());
+      }
 
       return formatter.toString();
     }
@@ -277,6 +302,48 @@ public class CallTestSupport {
       if (status == 0 && result == null && function == null) {
         throw new IllegalStateException(String.format(MISFORMED_RESPONSE, this));
       }
+    }
+  }
+
+  private static class ErrorFormatter {
+    private String call;
+    private List<String> descriptors = new ArrayList<>();
+
+    ErrorFormatter(String call) {
+      this.call = call;
+    }
+
+    ErrorFormatter addDescriptor(String type, Object value) {
+      if (isDefined(value)) {
+        descriptors.add(String.format("%s '%s'", type, value));
+      }
+      return this;
+    }
+
+    private boolean isDefined(Object value) {
+      return !isEmptyString(value);
+    }
+
+    private boolean isEmptyString(Object value) {
+      return value instanceof String && isEmpty((String) value);
+    }
+
+    private boolean isEmpty(String value) {
+      return value.trim().length() == 0;
+    }
+
+    public String toString() {
+      StringBuilder sb = new StringBuilder(call);
+      if (!descriptors.isEmpty()) {
+        sb.append(" with ").append(descriptors.get(0));
+        for (int i = 1; i < descriptors.size() - 1; i++) {
+          sb.append(", ").append(descriptors.get(i));
+        }
+        if (descriptors.size() > 1) {
+          sb.append(" and ").append(descriptors.get(descriptors.size() - 1));
+        }
+      }
+      return sb.toString();
     }
   }
 
@@ -298,58 +365,12 @@ public class CallTestSupport {
     }
   }
 
-  private static String toString(RequestParams requestParams, AdditionalParams additionalParams) {
-    return new ErrorFormatter(requestParams.call)
-        .addDescriptor("namespace", requestParams.namespace)
-        .addDescriptor("name", requestParams.name)
-        .addDescriptor("fieldSelector", additionalParams.getFieldSelector())
-        .addDescriptor("labelSelector", additionalParams.getLabelSelector())
-        .addDescriptor("body", requestParams.body)
-        .toString();
-  }
-
-  private static class ErrorFormatter {
-    private String call;
-    private List<String> descriptors = new ArrayList<>();
-
-    ErrorFormatter(String call) {
-      this.call = call;
-    }
-
-    ErrorFormatter addDescriptor(String type, Object value) {
-      if (isDefined(value)) descriptors.add(String.format("%s '%s'", type, value));
-      return this;
-    }
-
-    private boolean isDefined(Object value) {
-      return !isEmptyString(value);
-    }
-
-    private boolean isEmptyString(Object value) {
-      return value instanceof String && isEmpty((String) value);
-    }
-
-    private boolean isEmpty(String value) {
-      return value.trim().length() == 0;
-    }
-
-    public String toString() {
-      StringBuilder sb = new StringBuilder(call);
-      if (!descriptors.isEmpty()) {
-        sb.append(" with ").append(descriptors.get(0));
-        for (int i = 1; i < descriptors.size() - 1; i++) sb.append(", ").append(descriptors.get(i));
-        if (descriptors.size() > 1)
-          sb.append(" and ").append(descriptors.get(descriptors.size() - 1));
-      }
-      return sb.toString();
-    }
-  }
-
   private class CallDispatcherStub implements SynchronousCallDispatcher {
     @SuppressWarnings("unchecked")
     @Override
     public <T> T execute(
-        SynchronousCallFactory<T> factory, RequestParams requestParams, Pool<ApiClient> helper) {
+        SynchronousCallFactory<T> factory, RequestParams requestParams, Pool<ApiClient> helper)
+        throws ApiException {
       return (T) getMatchingResponse(requestParams, null, null).getResult(requestParams);
     }
   }

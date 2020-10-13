@@ -1,12 +1,12 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
-import com.appscode.voyager.client.models.V1beta1Ingress;
-import io.kubernetes.client.models.V1Service;
 import java.nio.file.Path;
+
+import io.kubernetes.client.openapi.models.NetworkingV1beta1Ingress;
+import io.kubernetes.client.openapi.models.V1Service;
 
 /**
  * Parses a generated weblogic-domain-voyager-ingress.yaml file into a set of typed k8s java objects
@@ -25,7 +25,7 @@ public class ParsedVoyagerIngressYaml extends ParsedKubernetesYaml {
     this.inputs = inputs;
   }
 
-  public V1beta1Ingress getVoyagerIngress() {
+  public NetworkingV1beta1Ingress getVoyagerIngress() {
     return getIngresses().find(getVoyagerIngressName());
   }
 
@@ -38,6 +38,6 @@ public class ParsedVoyagerIngressYaml extends ParsedKubernetesYaml {
   }
 
   private String getVoyagerIngressName() {
-    return inputs.getDomainUID() + "-voyager";
+    return inputs.getDomainUid() + "-voyager";
   }
 }

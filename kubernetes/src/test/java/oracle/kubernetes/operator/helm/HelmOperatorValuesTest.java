@@ -1,8 +1,13 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helm;
+
+import java.util.List;
+
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import org.junit.Test;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasEntry;
@@ -12,23 +17,17 @@ import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertThat;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import java.util.List;
-import org.junit.Test;
-
 public class HelmOperatorValuesTest {
 
   private static final String OPERATOR_CHART = "weblogic-operator";
 
   private final int intValue = getRandomInt();
   private final String stringValue = Integer.toString(intValue);
+  private final HelmOperatorValues operatorValues = new HelmOperatorValues();
 
   private static int getRandomInt() {
     return (int) (1000000 * Math.random());
   }
-
-  private final HelmOperatorValues operatorValues = new HelmOperatorValues();
 
   @Test
   public void whenServiceAccountSet_createdMapContainsValue() {
@@ -67,7 +66,7 @@ public class HelmOperatorValuesTest {
   }
 
   @Test
-  public void WeblogicOperatorImageIsGettableStringValue() {
+  public void weblogicOperatorImageIsGettableStringValue() {
     operatorValues.weblogicOperatorImage(stringValue);
 
     assertThat(operatorValues.getWeblogicOperatorImage(), equalTo(stringValue));
@@ -102,7 +101,7 @@ public class HelmOperatorValuesTest {
   }
 
   @Test
-  public void JavaLoggingLevelIsGettableStringValue() {
+  public void javaLoggingLevelIsGettableStringValue() {
     operatorValues.javaLoggingLevel(stringValue);
 
     assertThat(operatorValues.getJavaLoggingLevel(), equalTo(stringValue));
@@ -133,7 +132,7 @@ public class HelmOperatorValuesTest {
   }
 
   @Test
-  public void WeblogicOperatorNamespaceIsGettableStringValue() {
+  public void weblogicOperatorNamespaceIsGettableStringValue() {
     operatorValues.namespace(stringValue);
 
     assertThat(operatorValues.getNamespace(), equalTo(stringValue));
@@ -162,7 +161,7 @@ public class HelmOperatorValuesTest {
   }
 
   @Test
-  public void WeblogicOperatorImagePullPolicyIsGettableStringValue() {
+  public void weblogicOperatorImagePullPolicyIsGettableStringValue() {
     operatorValues.weblogicOperatorImagePullPolicy(stringValue);
 
     assertThat(operatorValues.getWeblogicOperatorImagePullPolicy(), equalTo(stringValue));
@@ -240,6 +239,50 @@ public class HelmOperatorValuesTest {
         new HelmOperatorValues(ImmutableMap.of("remoteDebugNodePortEnabled", false));
 
     assertThat(values.getRemoteDebugNodePortEnabled(), equalTo("false"));
+  }
+
+  // --------------- suspendOnDebugStartup
+
+  @Test
+  public void whenSuspendOnDebugStartupTrue_createdMapContainsValue() {
+    operatorValues.suspendOnDebugStartup("true");
+
+    assertThat(operatorValues.createMap(), hasEntry("suspendOnDebugStartup", true));
+  }
+
+  @Test
+  public void whenSuspendOnDebugStartupFalse_createdMapContainsValue() {
+    operatorValues.suspendOnDebugStartup("false");
+
+    assertThat(operatorValues.createMap(), hasEntry("suspendOnDebugStartup", false));
+  }
+
+  @Test
+  public void whenSuspendOnDebugStartupNotSet_createdMapLacksValue() {
+    assertThat(operatorValues.createMap(), not(hasKey("suspendOnDebugStartup")));
+  }
+
+  @Test
+  public void whenCreatedFromMapWithoutSuspendOnDebugStartup_hasEmptyString() {
+    HelmOperatorValues values = new HelmOperatorValues(ImmutableMap.of());
+
+    assertThat(values.getSuspendOnDebugStartup(), equalTo(""));
+  }
+
+  @Test
+  public void whenCreatedFromMapWithSuspendOnDebugStartupTrue_hasSpecifiedValue() {
+    HelmOperatorValues values =
+        new HelmOperatorValues(ImmutableMap.of("suspendOnDebugStartup", true));
+
+    assertThat(values.getSuspendOnDebugStartup(), equalTo("true"));
+  }
+
+  @Test
+  public void whenCreatedFromMapWithSuspendOnDebugStartupFalse_hasSpecifiedValue() {
+    HelmOperatorValues values =
+        new HelmOperatorValues(ImmutableMap.of("suspendOnDebugStartup", false));
+
+    assertThat(values.getSuspendOnDebugStartup(), equalTo("false"));
   }
 
   // --------------- elkIntegrationEnabled
@@ -337,7 +380,7 @@ public class HelmOperatorValuesTest {
   }
 
   @Test
-  public void InternalDebugHttpPortIsGettableStringValue() {
+  public void internalDebugHttpPortIsGettableStringValue() {
     operatorValues.internalDebugHttpPort(stringValue);
 
     assertThat(operatorValues.getInternalDebugHttpPort(), equalTo(stringValue));
@@ -423,7 +466,7 @@ public class HelmOperatorValuesTest {
   }
 
   @Test
-  public void ExternalDebugHttpPortIsGettableStringValue() {
+  public void externalDebugHttpPortIsGettableStringValue() {
     operatorValues.externalDebugHttpPort(stringValue);
 
     assertThat(operatorValues.getExternalDebugHttpPort(), equalTo(stringValue));
@@ -444,6 +487,50 @@ public class HelmOperatorValuesTest {
     assertThat(values.getExternalDebugHttpPort(), equalTo(stringValue));
   }
 
+  // --------------- dedicated
+
+  @Test
+  public void whenDedicatedTrue_createdMapContainsValue() {
+    operatorValues.dedicated("true");
+
+    assertThat(operatorValues.createMap(), hasEntry("dedicated", true));
+  }
+
+  @Test
+  public void whenDedicatedFalse_createdMapContainsValue() {
+    operatorValues.dedicated("false");
+
+    assertThat(operatorValues.createMap(), hasEntry("dedicated", false));
+  }
+
+  @Test
+  public void whenDedicatedNotSet_createdMapLacksValue() {
+    assertThat(operatorValues.createMap(), not(hasKey("dedicated")));
+  }
+
+  @Test
+  public void whenCreatedFromMapWithoutDedicated_hasEmptyString() {
+    HelmOperatorValues values = new HelmOperatorValues(ImmutableMap.of());
+
+    assertThat(values.getDedicated(), equalTo(""));
+  }
+
+  @Test
+  public void whenCreatedFromMapWithDedicatedTrue_hasSpecifiedValue() {
+    HelmOperatorValues values =
+        new HelmOperatorValues(ImmutableMap.of("dedicated", true));
+
+    assertThat(values.getDedicated(), equalTo("true"));
+  }
+
+  @Test
+  public void whenCreatedFromMapWithDedicatedFalse_hasSpecifiedValue() {
+    HelmOperatorValues values =
+        new HelmOperatorValues(ImmutableMap.of("dedicated", false));
+
+    assertThat(values.getDedicated(), equalTo("false"));
+  }
+
   @Test
   public void whenCreatedFromMap_hasSpecifiedValues() {
     HelmOperatorValues values =
@@ -457,36 +544,5 @@ public class HelmOperatorValuesTest {
     assertThat(values.getServiceAccount(), equalTo("test-account"));
     assertThat(values.getWeblogicOperatorImage(), equalTo("test-image"));
     assertThat(values.getJavaLoggingLevel(), equalTo("FINE"));
-  }
-
-  @Test
-  public void operatorHelmChartDefault_areCorrect() throws Exception {
-    assertThat(
-        getActualOperatorHelmChartDefaultValues(),
-        equalTo(getExpectedOperatorHelmChartDefaultValues()));
-  }
-
-  private String getExpectedOperatorHelmChartDefaultValues() {
-    StringBuilder sb = new StringBuilder();
-    sb.append("domainNamespaces:\n")
-        .append("- default\n")
-        .append("elasticSearchHost: elasticsearch.default.svc.cluster.local\n")
-        .append("elasticSearchPort: 9200\n")
-        .append("elkIntegrationEnabled: false\n")
-        .append("externalDebugHttpPort: 30999\n")
-        .append("externalRestEnabled: false\n")
-        .append("externalRestHttpsPort: 31001\n")
-        .append("image: weblogic-kubernetes-operator:2.0\n")
-        .append("imagePullPolicy: IfNotPresent\n")
-        .append("internalDebugHttpPort: 30999\n")
-        .append("javaLoggingLevel: INFO\n")
-        .append("logStashImage: logstash:5\n")
-        .append("remoteDebugNodePortEnabled: false\n")
-        .append("serviceAccount: default\n");
-    return sb.toString();
-  }
-
-  private String getActualOperatorHelmChartDefaultValues() throws Exception {
-    return (new ChartDefaultValues(OPERATOR_CHART)).getDefaultValuesAsYaml();
   }
 }

@@ -1,18 +1,8 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.json.mojo;
 
-import static com.meterware.simplestub.Stub.createNiceStub;
-import static java.util.Collections.singletonList;
-import static org.apache.maven.plugins.annotations.LifecyclePhase.PROCESS_CLASSES;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.*;
-import static org.objectweb.asm.Opcodes.ASM5;
-
-import com.meterware.simplestub.Memento;
-import com.meterware.simplestub.StaticStubSupport;
 import java.io.File;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
@@ -25,6 +15,10 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import com.google.common.collect.ImmutableMap;
+import com.meterware.simplestub.Memento;
+import com.meterware.simplestub.StaticStubSupport;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.logging.Log;
@@ -39,15 +33,30 @@ import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.TypePath;
 
+import static com.meterware.simplestub.Stub.createNiceStub;
+import static java.util.Collections.singletonList;
+import static org.apache.maven.plugins.annotations.LifecyclePhase.PROCESS_CLASSES;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.arrayContaining;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.sameInstance;
+import static org.objectweb.asm.Opcodes.ASM7;
+
 @SuppressWarnings("SameParameterValue")
 public class JsonSchemaMojoTest {
 
   private static final List<String> EMPTY_CLASSPATH = new ArrayList<>();
   private static final String TARGET_DIR = "/target/dir";
   private static final String TEST_ROOT_CLASS = "a.b.c.D";
-  private static final File SCHEMA_FILE = createFile(TARGET_DIR, TEST_ROOT_CLASS, ".json");
-  private static final File CLASS_FILE = createFile("/classes", TEST_ROOT_CLASS, ".class");
   private static final String DOT = "\\.";
+  private static final File SCHEMA_FILE = createFile(TARGET_DIR, TEST_ROOT_CLASS, ".json");
+  private static final File MARKDOWN_FILE = createFile(TARGET_DIR, TEST_ROOT_CLASS, ".md");
+  private static final File CLASS_FILE = createFile("/classes", TEST_ROOT_CLASS, ".class");
   private static final String SPECIFIED_FILE_NAME = "specifiedFile.json";
   private static final File SPECIFIED_FILE = new File(TARGET_DIR + "/" + SPECIFIED_FILE_NAME);
 
@@ -69,6 +78,23 @@ public class JsonSchemaMojoTest {
     return className.replaceAll(DOT, File.separator);
   }
 
+  private static File getTargetDir(Class<?> aaClass) throws URISyntaxException {
+    File dir = getPackageDir(aaClass);
+    while (dir.getParent() != null && !dir.getName().equals("target")) {
+      dir = dir.getParentFile();
+    }
+    return dir;
+  }
+
+  private static File getPackageDir(Class<?> aaClass) throws URISyntaxException {
+    URL url = aaClass.getResource(aaClass.getSimpleName() + ".class");
+    return Paths.get(url.toURI()).toFile().getParentFile();
+  }
+
+  /**
+   * Setup test.
+   * @throws Exception on failure
+   */
   @Before
   public void setUp() throws Exception {
     ClassReader classReader = new ClassReader(JsonSchemaMojo.class.getName());
@@ -102,9 +128,14 @@ public class JsonSchemaMojoTest {
     return field.get(mojo);
   }
 
+  /**
+   * Tear down test.
+   */
   @After
   public void tearDown() {
-    for (Memento memento : mementos) memento.revert();
+    for (Memento memento : mementos) {
+      memento.revert();
+    }
   }
 
   @Test
@@ -161,14 +192,6 @@ public class JsonSchemaMojoTest {
   }
 
   @Test
-  public void hasIncludeDeprecatedField_withAnnotation() throws NoSuchFieldException {
-    Field includeDeprecatedField = JsonSchemaMojo.class.getDeclaredField("includeDeprecated");
-    assertThat(includeDeprecatedField.getType(), equalTo(boolean.class));
-    assertThat(
-        fieldAnnotations.get(includeDeprecatedField), hasKey(toDescription(Parameter.class)));
-  }
-
-  @Test
   public void hasIncludeAdditionalPropertiesField_withAnnotation() throws NoSuchFieldException {
     Field includeAdditionalPropertiesField =
         JsonSchemaMojo.class.getDeclaredField("includeAdditionalProperties");
@@ -189,11 +212,47 @@ public class JsonSchemaMojoTest {
   }
 
   @Test
+  public void hasKubernetesVersionField_withAnnotation() throws Exception {
+    Field supportObjectReferencesField = JsonSchemaMojo.class.getDeclaredField("kubernetesVersion");
+    assertThat(supportObjectReferencesField.getType(), equalTo(String.class));
+    assertThat(
+        fieldAnnotations.get(supportObjectReferencesField), hasKey(toDescription(Parameter.class)));
+    assertThat(getMojoParameter("kubernetesVersion"), nullValue());
+  }
+
+  @Test
+  public void hasGenerateMarkdownField_withAnnotation() throws Exception {
+    Field supportObjectReferencesField = JsonSchemaMojo.class.getDeclaredField("generateMarkdown");
+    assertThat(supportObjectReferencesField.getType(), equalTo(boolean.class));
+    assertThat(
+        fieldAnnotations.get(supportObjectReferencesField), hasKey(toDescription(Parameter.class)));
+    assertThat(getMojoParameter("generateMarkdown"), is(false));
+  }
+
+  @Test
   public void hasOutputFileField_withAnnotation() throws Exception {
     Field field = JsonSchemaMojo.class.getDeclaredField("outputFile");
     assertThat(field.getType(), equalTo(String.class));
     assertThat(fieldAnnotations.get(field), hasKey(toDescription(Parameter.class)));
     assertThat(getMojoParameter("outputFile"), nullValue());
+  }
+
+  @Test
+  public void whenKubernetesVersionSpecified_passToGenerator() throws Exception {
+    setMojoParameter("kubernetesVersion", "1.9.0");
+
+    mojo.execute();
+
+    assertThat(main.getKubernetesVersion(), equalTo("1.9.0"));
+  }
+
+  @Test
+  public void whenKubernetesVersionNotSpecified_passToGenerator() throws Exception {
+    setMojoParameter("kubernetesVersion", null);
+
+    mojo.execute();
+
+    assertThat(main.getKubernetesVersion(), nullValue());
   }
 
   @Test
@@ -242,8 +301,9 @@ public class JsonSchemaMojoTest {
     String[] classpathElements = new String[] {"a", "b", "c"};
     setMojoParameter("compileClasspathElements", Arrays.asList(classpathElements));
     URL[] classPathUrls = new URL[] {new URL("file:abc"), new URL("file:bcd"), new URL("file:cde")};
-    for (int i = 0; i < classpathElements.length; i++)
-      fileSystem.defineURL(new File(classpathElements[i]), classPathUrls[i]);
+    for (int i = 0; i < classpathElements.length; i++) {
+      fileSystem.defineUrl(new File(classpathElements[i]), classPathUrls[i]);
+    }
 
     mojo.execute();
 
@@ -254,7 +314,34 @@ public class JsonSchemaMojoTest {
   public void generateToExpectedLocation() throws Exception {
     mojo.execute();
 
-    assertThat(main.getOutputFile(), equalTo(SCHEMA_FILE));
+    assertThat(main.getSchemaFile(), equalTo(SCHEMA_FILE));
+  }
+
+  @Test
+  public void whenGenerateMarkdownNotSpecified_dontGenerateMarkdown() throws Exception {
+    mojo.execute();
+
+    assertThat(main.getMarkdownFile(), nullValue());
+  }
+
+  @Test
+  public void whenGenerateMarkdownSpecified_generateMarkdown() throws Exception {
+    setMojoParameter("generateMarkdown", true);
+
+    mojo.execute();
+
+    assertThat(main.getMarkdownFile(), equalTo(MARKDOWN_FILE));
+  }
+
+  @Test
+  public void whenGenerateMarkdownSpecified_useGeneratedSchemaForMarkdown() throws Exception {
+    ImmutableMap<String, Object> generatedSchema = ImmutableMap.of();
+    main.setGeneratedSchema(generatedSchema);
+    setMojoParameter("generateMarkdown", true);
+
+    mojo.execute();
+
+    assertThat(main.getMarkdownSchema(), sameInstance(generatedSchema));
   }
 
   @Test
@@ -265,7 +352,7 @@ public class JsonSchemaMojoTest {
 
     mojo.execute();
 
-    assertThat(main.getOutputFile(), nullValue());
+    assertThat(main.getSchemaFile(), nullValue());
   }
 
   @Test
@@ -276,7 +363,7 @@ public class JsonSchemaMojoTest {
 
     mojo.execute();
 
-    assertThat(main.getOutputFile(), equalTo(SCHEMA_FILE));
+    assertThat(main.getSchemaFile(), equalTo(SCHEMA_FILE));
   }
 
   @Test
@@ -284,16 +371,7 @@ public class JsonSchemaMojoTest {
     setMojoParameter("outputFile", SPECIFIED_FILE_NAME);
     mojo.execute();
 
-    assertThat(main.getOutputFile(), equalTo(SPECIFIED_FILE));
-  }
-
-  @Test
-  public void whenIncludeDeprecatedSet_setOnMain() throws Exception {
-    setMojoParameter("includeDeprecated", true);
-
-    mojo.execute();
-
-    assertThat(main.isIncludeDeprecated(), is(true));
+    assertThat(main.getSchemaFile(), equalTo(SPECIFIED_FILE));
   }
 
   @Test
@@ -324,11 +402,46 @@ public class JsonSchemaMojoTest {
     return fieldAnnotations.get(field).get(toDescription(annotation));
   }
 
+  private Map<String, AnnotationInfo> getOrCreateAnnotationMap(Field field) {
+    Map<String, AnnotationInfo> map = fieldAnnotations.get(field);
+    return map != null ? map : createAnnotationMap(field);
+  }
+
+  private Map<String, AnnotationInfo> createAnnotationMap(Field field) {
+    Map<String, AnnotationInfo> map = new HashMap<>();
+    fieldAnnotations.put(field, map);
+    return map;
+  }
+
+  private String toDescription(Class<? extends Annotation> aaClass) {
+    return "L" + aaClass.getName().replaceAll(DOT, "/") + ';';
+  }
+
+  private AnnotationInfo getOrCreateAnnotationInfo(
+      String description, Map<String, AnnotationInfo> map) {
+    AnnotationInfo info = map.get(description);
+    return info != null ? info : createAnnotationInfo(map, description);
+  }
+
+  private AnnotationInfo createAnnotationInfo(Map<String, AnnotationInfo> map, String description) {
+    AnnotationInfo info = new AnnotationInfo();
+    map.put(description, info);
+    return info;
+  }
+
+  private URL toModuleUrl(String path) throws URISyntaxException, MalformedURLException {
+    return new File(getModuleDir(), path).toURI().toURL();
+  }
+
+  private File getModuleDir() throws URISyntaxException {
+    return getTargetDir(getClass()).getParentFile();
+  }
+
   private class Visitor extends ClassVisitor {
     private Class<?> theClass;
 
     Visitor(Class<?> theClass) {
-      super(ASM5);
+      super(ASM7);
       this.theClass = theClass;
     }
 
@@ -357,23 +470,12 @@ public class JsonSchemaMojoTest {
     }
   }
 
-  private Map<String, AnnotationInfo> getOrCreateAnnotationMap(Field field) {
-    Map<String, AnnotationInfo> map = fieldAnnotations.get(field);
-    return map != null ? map : createAnnotationMap(field);
-  }
-
-  private Map<String, AnnotationInfo> createAnnotationMap(Field field) {
-    Map<String, AnnotationInfo> map = new HashMap<>();
-    fieldAnnotations.put(field, map);
-    return map;
-  }
-
   private abstract class MojoAnnotationVisitor extends AnnotationVisitor {
     private String annotationClassDesc;
     private Map<String, AnnotationInfo> annotations;
 
     MojoAnnotationVisitor(Map<String, AnnotationInfo> annotations, String desc) {
-      super(ASM5);
+      super(ASM7);
       this.annotations = annotations;
       annotationClassDesc = desc;
       annotations.put(desc, new AnnotationInfo());
@@ -402,7 +504,9 @@ public class JsonSchemaMojoTest {
 
     private Object getEnumConstant(Class<?> enumClass, String value) {
       for (Object constant : enumClass.getEnumConstants()) {
-        if (value.equalsIgnoreCase(constant.toString())) return constant;
+        if (value.equalsIgnoreCase(constant.toString())) {
+          return constant;
+        }
       }
       throw new RuntimeException("No enum constant " + value + " in " + enumClass);
     }
@@ -425,7 +529,7 @@ public class JsonSchemaMojoTest {
     private final Map<String, AnnotationInfo> annotationMap;
 
     MojoFieldVisitor(Field field) {
-      super(ASM5);
+      super(ASM7);
       this.annotationMap = getOrCreateAnnotationMap(field);
     }
 
@@ -435,44 +539,7 @@ public class JsonSchemaMojoTest {
     }
   }
 
-  private String toDescription(Class<? extends Annotation> aClass) {
-    return "L" + aClass.getName().replaceAll(DOT, "/") + ';';
-  }
-
-  private AnnotationInfo getOrCreateAnnotationInfo(
-      String description, Map<String, AnnotationInfo> map) {
-    AnnotationInfo info = map.get(description);
-    return info != null ? info : createAnnotationInfo(map, description);
-  }
-
-  private AnnotationInfo createAnnotationInfo(Map<String, AnnotationInfo> map, String description) {
-    AnnotationInfo info = new AnnotationInfo();
-    map.put(description, info);
-    return info;
-  }
-
   private class AnnotationInfo {
     private Map<String, Object> fields = new HashMap<>();
-  }
-
-  private URL toModuleUrl(String path) throws URISyntaxException, MalformedURLException {
-    return new File(getModuleDir(), path).toURI().toURL();
-  }
-
-  private File getModuleDir() throws URISyntaxException {
-    return getTargetDir(getClass()).getParentFile();
-  }
-
-  private static File getTargetDir(Class<?> aClass) throws URISyntaxException {
-    File dir = getPackageDir(aClass);
-    while (dir.getParent() != null && !dir.getName().equals("target")) {
-      dir = dir.getParentFile();
-    }
-    return dir;
-  }
-
-  private static File getPackageDir(Class<?> aClass) throws URISyntaxException {
-    URL url = aClass.getResource(aClass.getSimpleName() + ".class");
-    return Paths.get(url.toURI()).toFile().getParentFile();
   }
 }

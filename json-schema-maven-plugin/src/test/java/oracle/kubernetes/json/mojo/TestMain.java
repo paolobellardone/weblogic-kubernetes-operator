@@ -1,6 +1,5 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.json.mojo;
 
@@ -14,19 +13,18 @@ public class TestMain implements Main {
   private URL[] classpath;
   private URL classpathResource;
   private String className;
-  private File outputFile;
+  private File schemaFile;
   private String resourceName;
-  private boolean includeDeprecated;
   private Map<URL, URL> schemas = new HashMap<>();
+  private String kubernetesVersion;
   private boolean includeAdditionalProperties;
   private boolean supportObjectReferences;
+  private File markdownFile;
+  private Map<String, Object> schema;
+  private Map<String, Object> markdownSchema;
 
   TestMain() throws MalformedURLException {
     classpathResource = new URL("file:abc");
-  }
-
-  boolean isIncludeDeprecated() {
-    return includeDeprecated;
   }
 
   URL[] getClasspath() {
@@ -45,16 +43,42 @@ public class TestMain implements Main {
     return className;
   }
 
-  File getOutputFile() {
-    return outputFile;
+  File getSchemaFile() {
+    return schemaFile;
+  }
+
+  File getMarkdownFile() {
+    return markdownFile;
+  }
+
+  public Map<String, Object> getMarkdownSchema() {
+    return markdownSchema;
+  }
+
+  void setGeneratedSchema(Map<String, Object> schema) {
+    this.schema = schema;
   }
 
   URL getCacheFor(URL schemaUrl) {
     return schemas.get(schemaUrl);
   }
 
+  String getKubernetesVersion() {
+    return kubernetesVersion;
+  }
+
+  @Override
+  public void setKubernetesVersion(String kubernetesVersion) {
+    this.kubernetesVersion = kubernetesVersion;
+  }
+
   boolean isIncludeAdditionalProperties() {
     return includeAdditionalProperties;
+  }
+
+  @Override
+  public void setIncludeAdditionalProperties(boolean includeAdditionalProperties) {
+    this.includeAdditionalProperties = includeAdditionalProperties;
   }
 
   boolean isSupportObjectReferences() {
@@ -67,18 +91,8 @@ public class TestMain implements Main {
   }
 
   @Override
-  public void defineSchemaUrlAndContents(URL schemaURL, URL cacheUrl) {
-    schemas.put(schemaURL, cacheUrl);
-  }
-
-  @Override
-  public void setIncludeDeprecated(boolean includeDeprecated) {
-    this.includeDeprecated = includeDeprecated;
-  }
-
-  @Override
-  public void setIncludeAdditionalProperties(boolean includeAdditionalProperties) {
-    this.includeAdditionalProperties = includeAdditionalProperties;
+  public void defineSchemaUrlAndContents(URL schemaUrl, URL cacheUrl) {
+    schemas.put(schemaUrl, cacheUrl);
   }
 
   @Override
@@ -93,8 +107,15 @@ public class TestMain implements Main {
   }
 
   @Override
-  public void generateSchema(String className, File outputFile) {
+  public Map<String, Object> generateSchema(String className, File outputFile) {
     this.className = className;
-    this.outputFile = outputFile;
+    this.schemaFile = outputFile;
+    return schema;
+  }
+
+  @Override
+  public void generateMarkdown(String rootName, File markdownFile, Map<String, Object> schema) {
+    this.markdownFile = markdownFile;
+    this.markdownSchema = schema;
   }
 }

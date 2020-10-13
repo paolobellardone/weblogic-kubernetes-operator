@@ -1,6 +1,5 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator;
 
@@ -8,6 +7,7 @@ import java.io.IOException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+
 import oracle.kubernetes.operator.helpers.ConfigMapConsumer;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
@@ -23,23 +23,22 @@ public class TuningParametersImpl extends ConfigMapConsumer implements TuningPar
   private WatchTuning watch = null;
   private PodTuning pod = null;
 
-  static synchronized TuningParameters initializeInstance(
-      ScheduledExecutorService executorService, String mountPoint) throws IOException {
-    if (INSTANCE == null) {
-      INSTANCE = new TuningParametersImpl(executorService, mountPoint);
-      return INSTANCE;
-    }
-    throw new IllegalStateException();
-  }
-
-  public static synchronized TuningParameters getInstance() {
-    return INSTANCE;
-  }
-
   private TuningParametersImpl(ScheduledExecutorService executorService, String mountPoint)
       throws IOException {
     super(executorService, mountPoint, TuningParametersImpl::updateTuningParameters);
     update();
+  }
+
+  static synchronized TuningParameters initializeInstance(
+      ScheduledExecutorService executorService, String mountPoint) throws IOException {
+    if (INSTANCE == null) {
+      INSTANCE = new TuningParametersImpl(executorService, mountPoint);
+    }
+    return INSTANCE;
+  }
+
+  public static synchronized TuningParameters getInstance() {
+    return INSTANCE;
   }
 
   private static void updateTuningParameters() {
@@ -47,8 +46,6 @@ public class TuningParametersImpl extends ConfigMapConsumer implements TuningPar
   }
 
   private void update() {
-    LOGGER.info(MessageKeys.TUNING_PARAMETERS);
-
     MainTuning main =
         new MainTuning(
             (int) readTuningParameter("domainPresenceFailureRetrySeconds", 10),
@@ -57,7 +54,7 @@ public class TuningParametersImpl extends ConfigMapConsumer implements TuningPar
             (int) readTuningParameter("targetNamespaceRecheckIntervalSeconds", 3),
             (int) readTuningParameter("statusUpdateTimeoutSeconds", 10),
             (int) readTuningParameter("statusUpdateUnchangedCountToDelayStatusRecheck", 10),
-            readTuningParameter("statusUpdateInitialShortDelay", 3),
+            readTuningParameter("statusUpdateInitialShortDelay", 5),
             readTuningParameter("statusUpdateEventualLongDelay", 30));
 
     CallBuilderTuning callBuilder =
@@ -66,19 +63,30 @@ public class TuningParametersImpl extends ConfigMapConsumer implements TuningPar
             (int) readTuningParameter("callMaxRetryCount", 5),
             (int) readTuningParameter("callTimeoutSeconds", 10));
 
-    WatchTuning watch = new WatchTuning((int) readTuningParameter("watchLifetime", 300));
+    WatchTuning watch =
+        new WatchTuning(
+            (int) readTuningParameter("watchLifetime", 300),
+            (int) readTuningParameter("watchMinimumDelay", 5),
+            (int) readTuningParameter("watchBackstopRecheckDelaySeconds", 5));
 
     PodTuning pod =
         new PodTuning(
-            (int) readTuningParameter("readinessProbeInitialDelaySeconds", 2),
+            (int) readTuningParameter("readinessProbeInitialDelaySeconds", 30),
             (int) readTuningParameter("readinessProbeTimeoutSeconds", 5),
             (int) readTuningParameter("readinessProbePeriodSeconds", 5),
-            (int) readTuningParameter("livenessProbeInitialDelaySeconds", 10),
+            (int) readTuningParameter("livenessProbeInitialDelaySeconds", 30),
             (int) readTuningParameter("livenessProbeTimeoutSeconds", 5),
-            (int) readTuningParameter("livenessProbePeriodSeconds", 10));
+            (int) readTuningParameter("livenessProbePeriodSeconds", 45),
+            readTuningParameter("introspectorJobActiveDeadlineSeconds", 120));
 
     lock.writeLock().lock();
     try {
+      if (!main.equals(this.main)
+          || !callBuilder.equals(this.callBuilder)
+          || !watch.equals(this.watch)
+          || !pod.equals(this.pod)) {
+        LOGGER.info(MessageKeys.TUNING_PARAMETERS);
+      }
       this.main = main;
       this.callBuilder = callBuilder;
       this.watch = watch;

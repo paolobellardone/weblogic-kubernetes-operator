@@ -1,31 +1,32 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator;
+
+import java.math.BigInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.util.Watch;
+import oracle.kubernetes.operator.builders.StubWatchFactory;
+import oracle.kubernetes.operator.watcher.WatchListener;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.DomainSpec;
+import org.junit.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasEntry;
 
-import io.kubernetes.client.models.V1ObjectMeta;
-import io.kubernetes.client.util.Watch;
-import java.util.concurrent.atomic.AtomicBoolean;
-import oracle.kubernetes.operator.builders.StubWatchFactory;
-import oracle.kubernetes.operator.watcher.WatchListener;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
-import oracle.kubernetes.weblogic.domain.v2.DomainSpec;
-import org.junit.Test;
-
 /** This test class verifies the behavior of the DomainWatcher. */
 public class DomainWatcherTest extends WatcherTestBase implements WatchListener<Domain> {
 
-  private static final int INITIAL_RESOURCE_VERSION = 456;
+  private static final BigInteger INITIAL_RESOURCE_VERSION = new BigInteger("456");
   private static final String UID = "uid";
 
   private Domain domain = createDomain();
 
   private static Domain createDomain() {
-    return new Domain().withSpec(new DomainSpec().withDomainUID(UID));
+    return new Domain().withSpec(new DomainSpec().withDomainUid(UID));
   }
 
   @Override
@@ -39,7 +40,7 @@ public class DomainWatcherTest extends WatcherTestBase implements WatchListener<
 
     assertThat(
         StubWatchFactory.getRequestParameters().get(0),
-        hasEntry("resourceVersion", Integer.toString(INITIAL_RESOURCE_VERSION)));
+        hasEntry("resourceVersion", INITIAL_RESOURCE_VERSION.toString()));
   }
 
   @Test
@@ -54,7 +55,7 @@ public class DomainWatcherTest extends WatcherTestBase implements WatchListener<
   }
 
   @Override
-  protected DomainWatcher createWatcher(String ns, AtomicBoolean stopping, int rv) {
-    return DomainWatcher.create(this, ns, Integer.toString(rv), tuning, this, stopping);
+  protected DomainWatcher createWatcher(String ns, AtomicBoolean stopping, BigInteger rv) {
+    return DomainWatcher.create(this, ns, rv.toString(), tuning, this, stopping);
   }
 }

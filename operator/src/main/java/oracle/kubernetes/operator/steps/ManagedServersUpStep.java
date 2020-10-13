@@ -1,138 +1,54 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.steps;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
+
 import oracle.kubernetes.operator.DomainStatusUpdater;
 import oracle.kubernetes.operator.ProcessingConstants;
 import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
 import oracle.kubernetes.operator.helpers.DomainPresenceInfo.ServerStartupInfo;
-import oracle.kubernetes.operator.helpers.ServerKubernetesObjects;
+import oracle.kubernetes.operator.helpers.PodHelper;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
+import oracle.kubernetes.operator.logging.MessageKeys;
 import oracle.kubernetes.operator.wlsconfig.WlsClusterConfig;
 import oracle.kubernetes.operator.wlsconfig.WlsDomainConfig;
 import oracle.kubernetes.operator.wlsconfig.WlsServerConfig;
 import oracle.kubernetes.operator.work.NextAction;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
-import oracle.kubernetes.weblogic.domain.v2.ServerSpec;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.ServerSpec;
+
+import static oracle.kubernetes.operator.DomainStatusUpdater.MANAGED_SERVERS_STARTING_PROGRESS_REASON;
+import static oracle.kubernetes.operator.DomainStatusUpdater.createProgressingStep;
 
 public class ManagedServersUpStep extends Step {
-  private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
   static final String SERVERS_UP_MSG =
       "Running servers for domain with UID: {0}, running list: {1}";
+  private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
   private static NextStepFactory NEXT_STEP_FACTORY =
       (info, config, servers, next) ->
-          scaleDownIfNecessary(info, config, servers, new ClusterServicesStep(info, next));
-
-  // an interface to provide a hook for unit testing.
-  interface NextStepFactory {
-    Step createServerStep(
-        DomainPresenceInfo info, WlsDomainConfig config, Collection<String> servers, Step next);
-  }
-
-  class ServersUpStepFactory {
-    WlsDomainConfig domainTopology;
-    Domain domain;
-    Collection<ServerStartupInfo> startupInfos;
-    Collection<String> servers = new ArrayList<>();
-    Map<String, Integer> replicas = new HashMap<>();
-
-    ServersUpStepFactory(WlsDomainConfig domainTopology, Domain domain) {
-      this.domainTopology = domainTopology;
-      this.domain = domain;
-    }
-
-    void addServerIfNeeded(@Nonnull WlsServerConfig serverConfig, WlsClusterConfig clusterConfig) {
-      String serverName = serverConfig.getName();
-      if (servers.contains(serverName) || serverName.equals(domainTopology.getAdminServerName()))
-        return;
-
-      String clusterName = clusterConfig == null ? null : clusterConfig.getClusterName();
-      ServerSpec server = domain.getServer(serverName, clusterName);
-
-      if (server.shouldStart(getReplicaCount(clusterName))) {
-        servers.add(serverName);
-        addStartupInfo(new ServerStartupInfo(serverConfig, clusterName, server));
-        addToCluster(clusterName);
-      }
-    }
-
-    private Step createNextStep(Step next) {
-      if (servers.isEmpty()) return next;
-      else return new ManagedServerUpIteratorStep(getStartupInfos(), next);
-    }
-
-    Collection<ServerStartupInfo> getStartupInfos() {
-      return startupInfos;
-    }
-
-    private void addStartupInfo(ServerStartupInfo startupInfo) {
-      if (startupInfos == null) startupInfos = new ArrayList<>();
-      startupInfos.add(startupInfo);
-    }
-
-    private void addToCluster(String clusterName) {
-      if (clusterName != null) replicas.put(clusterName, 1 + getReplicaCount(clusterName));
-    }
-
-    private Integer getReplicaCount(String clusterName) {
-      return Optional.ofNullable(replicas.get(clusterName)).orElse(0);
-    }
-  }
+          scaleDownIfNecessary(info, config, servers, new ClusterServicesStep(next));
 
   public ManagedServersUpStep(Step next) {
     super(next);
   }
 
-  @Override
-  public NextAction apply(Packet packet) {
-    LOGGER.entering();
-    DomainPresenceInfo info = packet.getSPI(DomainPresenceInfo.class);
-    WlsDomainConfig config = (WlsDomainConfig) packet.get(ProcessingConstants.DOMAIN_TOPOLOGY);
-
-    ServersUpStepFactory factory = new ServersUpStepFactory(config, info.getDomain());
-
-    if (LOGGER.isFineEnabled()) {
-      LOGGER.fine(SERVERS_UP_MSG, factory.domain.getDomainUID(), getRunningServers(info));
-    }
-
-    Set<String> clusteredServers = new HashSet<>();
-
-    for (WlsClusterConfig clusterConfig : config.getClusterConfigs().values()) {
-      for (WlsServerConfig serverConfig : clusterConfig.getServerConfigs()) {
-        factory.addServerIfNeeded(serverConfig, clusterConfig);
-        clusteredServers.add(serverConfig.getName());
-      }
-    }
-
-    for (WlsServerConfig serverConfig : config.getServerConfigs().values()) {
-      if (!clusteredServers.contains(serverConfig.getName()))
-        factory.addServerIfNeeded(serverConfig, null);
-    }
-
-    info.setServerStartupInfo(factory.getStartupInfos());
-    LOGGER.exiting();
-    return doNext(
-        NEXT_STEP_FACTORY.createServerStep(
-            info, config, factory.servers, factory.createNextStep(getNext())),
-        packet);
-  }
-
   public static Collection<String> getRunningServers(DomainPresenceInfo info) {
-    Collection<String> runningList = new ArrayList<>();
-    for (Map.Entry<String, ServerKubernetesObjects> entry : info.getServers().entrySet()) {
-      ServerKubernetesObjects sko = entry.getValue();
-      if (sko != null && sko.getPod().get() != null) {
-        runningList.add(entry.getKey());
-      }
-    }
-    return runningList;
+    return info.getServerPods().map(PodHelper::getPodServerName).collect(Collectors.toList());
   }
 
   private static Step scaleDownIfNecessary(
@@ -150,25 +66,22 @@ public class ManagedServersUpStep extends Step {
       serversToIgnore.add(domainTopology.getAdminServerName());
     }
 
-    Collection<Map.Entry<String, ServerKubernetesObjects>> serversToStop =
-        getServersToStop(info, serversToIgnore);
+    List<String> serversToStop = getServersToStop(info, serversToIgnore);
 
     if (!serversToStop.isEmpty()) {
-      insert(steps, new ServerDownIteratorStep(serversToStop, null));
+      insert(steps,
+          Step.chain(createProgressingStep(info, MANAGED_SERVERS_STARTING_PROGRESS_REASON, true, null),
+          new ServerDownIteratorStep(serversToStop, null)));
     }
 
     return Step.chain(steps.toArray(new Step[0]));
   }
 
-  private static Collection<Map.Entry<String, ServerKubernetesObjects>> getServersToStop(
+  private static List<String> getServersToStop(
       DomainPresenceInfo info, List<String> serversToIgnore) {
-    Collection<Map.Entry<String, ServerKubernetesObjects>> serversToStop = new ArrayList<>();
-    for (Map.Entry<String, ServerKubernetesObjects> entry : info.getServers().entrySet()) {
-      if (!serversToIgnore.contains(entry.getKey())) {
-        serversToStop.add(entry);
-      }
-    }
-    return serversToStop;
+    return info.getServerNames().stream()
+        .filter(n -> !serversToIgnore.contains(n))
+        .collect(Collectors.toList());
   }
 
   private static Step createAvailableHookStep() {
@@ -178,5 +91,188 @@ public class ManagedServersUpStep extends Step {
 
   private static void insert(List<Step> steps, Step step) {
     steps.add(0, step);
+  }
+
+  @Override
+  public NextAction apply(Packet packet) {
+    LOGGER.entering();
+    DomainPresenceInfo info = packet.getSpi(DomainPresenceInfo.class);
+    WlsDomainConfig config = (WlsDomainConfig) packet.get(ProcessingConstants.DOMAIN_TOPOLOGY);
+
+    ServersUpStepFactory factory = new ServersUpStepFactory(config, info.getDomain());
+
+    if (LOGGER.isFineEnabled()) {
+      LOGGER.fine(SERVERS_UP_MSG, factory.domain.getDomainUid(), getRunningServers(info));
+    }
+
+    Optional.ofNullable(config).ifPresent(wlsDomainConfig -> addServersToFactory(factory, wlsDomainConfig));
+
+    info.setServerStartupInfo(factory.getStartupInfos());
+    LOGGER.exiting();
+
+    return doNext(
+        NEXT_STEP_FACTORY.createServerStep(
+            info, config, factory.servers, factory.createNextStep(getNext())),
+        packet);
+  }
+
+  private void addServersToFactory(@Nonnull ServersUpStepFactory factory, @Nonnull WlsDomainConfig wlsDomainConfig) {
+    Set<String> clusteredServers = new HashSet<>();
+
+    wlsDomainConfig.getClusterConfigs().values()
+        .forEach(wlsClusterConfig -> addClusteredServersToFactory(factory, clusteredServers, wlsClusterConfig));
+
+    wlsDomainConfig.getServerConfigs().values().stream()
+        .filter(wlsServerConfig -> !clusteredServers.contains(wlsServerConfig.getName()))
+        .forEach(wlsServerConfig -> factory.addServerIfNeeded(wlsServerConfig, null));
+  }
+
+  private void addClusteredServersToFactory(@Nonnull ServersUpStepFactory factory, Set<String> clusteredServers,
+      @Nonnull WlsClusterConfig wlsClusterConfig) {
+    factory.logIfInvalidReplicaCount(wlsClusterConfig);
+    // We depend on 'getServerConfigs()' returning an ascending 'numero-lexi'
+    // sorted list so that a cluster's "lowest named" servers have precedence
+    // when the  cluster's replica  count is lower than  the WL cluster size.
+    wlsClusterConfig.getServerConfigs()
+        .forEach(wlsServerConfig -> {
+          factory.addServerIfNeeded(wlsServerConfig, wlsClusterConfig);
+          clusteredServers.add(wlsServerConfig.getName());
+        });
+  }
+
+  // an interface to provide a hook for unit testing.
+  interface NextStepFactory {
+    Step createServerStep(
+        DomainPresenceInfo info, WlsDomainConfig config, Collection<String> servers, Step next);
+  }
+
+  class ServersUpStepFactory {
+    final WlsDomainConfig domainTopology;
+    final Domain domain;
+    Collection<ServerStartupInfo> startupInfos;
+    final Collection<String> servers = new ArrayList<>();
+    final Map<String, Integer> replicas = new HashMap<>();
+
+    ServersUpStepFactory(WlsDomainConfig domainTopology, Domain domain) {
+      this.domainTopology = domainTopology;
+      this.domain = domain;
+    }
+
+    /**
+     * Checks whether we should pre-create server service for the given server.
+     *
+     * @param server ServerSpec for the managed server
+     * @return True if we should pre-create server service for the given managed server, false
+     *         otherwise.
+     */
+    boolean shouldPrecreateServerService(ServerSpec server) {
+      if (server.isPrecreateServerService()) {
+        // skip pre-create if admin server and managed server are both shutting down
+        return ! (domain.getAdminServerSpec().isShuttingDown() && server.isShuttingDown());
+      }
+      return false;
+    }
+
+    private void addServerIfNeeded(@Nonnull WlsServerConfig serverConfig, WlsClusterConfig clusterConfig) {
+      String serverName = serverConfig.getName();
+      if (servers.contains(serverName) || serverName.equals(domainTopology.getAdminServerName())) {
+        return;
+      }
+
+      String clusterName = clusterConfig == null ? null : clusterConfig.getClusterName();
+      ServerSpec server = domain.getServer(serverName, clusterName);
+
+      if (server.shouldStart(getReplicaCount(clusterName))) {
+        servers.add(serverName);
+        addStartupInfo(new ServerStartupInfo(serverConfig, clusterName, server));
+        addToCluster(clusterName);
+      } else if (shouldPrecreateServerService(server)) {
+        servers.add(serverName);
+        addStartupInfo(new ServerStartupInfo(serverConfig, clusterName, server, true));
+      }
+    }
+
+    boolean exceedsMaxConfiguredClusterSize(WlsClusterConfig clusterConfig) {
+      if (clusterConfig != null) {
+        String clusterName = clusterConfig.getClusterName();
+        int configMaxClusterSize = clusterConfig.getMaxDynamicClusterSize();
+        return clusterConfig.hasDynamicServers()
+            && clusterConfig.getServerConfigs().size() == configMaxClusterSize
+            && domain.getReplicaCount(clusterName) > configMaxClusterSize;
+      }
+      return false;
+    }
+
+    private Step createNextStep(Step next) {
+      if (servers.isEmpty()) {
+        return next;
+      } else {
+        return new ManagedServerUpIteratorStep(getStartupInfos(), next);
+      }
+    }
+
+    Collection<ServerStartupInfo> getStartupInfos() {
+      return startupInfos;
+    }
+
+    private void addStartupInfo(ServerStartupInfo startupInfo) {
+      if (startupInfos == null) {
+        startupInfos = new ArrayList<>();
+      }
+      startupInfos.add(startupInfo);
+    }
+
+    private void addToCluster(String clusterName) {
+      if (clusterName != null) {
+        replicas.put(clusterName, 1 + getReplicaCount(clusterName));
+      }
+    }
+
+    private Integer getReplicaCount(String clusterName) {
+      return Optional.ofNullable(replicas.get(clusterName)).orElse(0);
+    }
+
+    private void logIfReplicasExceedsClusterServersMax(WlsClusterConfig clusterConfig) {
+      if (exceedsMaxConfiguredClusterSize(clusterConfig)) {
+        String clusterName = clusterConfig.getClusterName();
+        LOGGER.warning(
+            MessageKeys.REPLICAS_EXCEEDS_TOTAL_CLUSTER_SERVER_COUNT,
+            domain.getReplicaCount(clusterName),
+            clusterConfig.getMaxDynamicClusterSize(),
+            clusterName);
+      }
+    }
+
+    private void logIfReplicasLessThanClusterServersMin(WlsClusterConfig clusterConfig) {
+      if (lessThanMinConfiguredClusterSize(clusterConfig)) {
+        String clusterName = clusterConfig.getClusterName();
+        LOGGER.warning(
+                MessageKeys.REPLICAS_LESS_THAN_TOTAL_CLUSTER_SERVER_COUNT,
+                domain.getReplicaCount(clusterName),
+                clusterConfig.getMinDynamicClusterSize(),
+                clusterName);
+
+        // Reset current replica count so we don't scale down less than minimum
+        // dynamic cluster size
+        domain.setReplicaCount(clusterName, clusterConfig.getMinDynamicClusterSize());
+      }
+    }
+
+    private boolean lessThanMinConfiguredClusterSize(WlsClusterConfig clusterConfig) {
+      if (clusterConfig != null) {
+        String clusterName = clusterConfig.getClusterName();
+        if (clusterConfig.hasDynamicServers()
+            && !domain.isAllowReplicasBelowMinDynClusterSize(clusterName)) {
+          int configMinClusterSize = clusterConfig.getMinDynamicClusterSize();
+          return domain.getReplicaCount(clusterName) < configMinClusterSize;
+        }
+      }
+      return false;
+    }
+
+    private void logIfInvalidReplicaCount(WlsClusterConfig clusterConfig) {
+      logIfReplicasExceedsClusterServersMax(clusterConfig);
+      logIfReplicasLessThanClusterServersMin(clusterConfig);
+    }
   }
 }

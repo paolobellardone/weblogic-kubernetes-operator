@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
-# Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+#!/bin/bash
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 # do not turn on 'set -x' since it can print sensitive info, like secrets and private keys, to the oeprator log
 #set -x
@@ -73,7 +73,6 @@ function generateInternalIdentity {
     -srckeystore ${OP_JKS} \
     -srcstorepass ${TEMP_PW} \
     -destkeystore ${OP_PKCS12} \
-    -srcstorepass ${TEMP_PW} \
     -deststorepass ${TEMP_PW} \
     -deststoretype PKCS12
 
@@ -94,7 +93,7 @@ function generateInternalIdentity {
 function recordInternalIdentity {
   CACERT='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
   TOKEN=`cat /var/run/secrets/kubernetes.io/serviceaccount/token`
-  KUBERNETES_MASTER="https://kubernetes.default.svc"
+  KUBERNETES_MASTER="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"
 
   # the request body prints out the atz token
   # don't specify -v so that the token is not printed to the operator log
@@ -156,4 +155,3 @@ else
 fi
 
 SUCCEEDED=true
-

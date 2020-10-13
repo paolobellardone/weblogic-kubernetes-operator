@@ -1,6 +1,5 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
@@ -8,7 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
-import java.util.logging.Logger;
+import java.util.UUID;
+import java.util.logging.Level;
+
 import oracle.kubernetes.operator.BaseTest;
 
 public class PersistentVolume {
@@ -16,66 +17,82 @@ public class PersistentVolume {
   private Map<String, Object> pvMap;
   private String dirPath;
 
-  private static final Logger logger = Logger.getLogger("OperatorIT", "OperatorIT");
-
-  public PersistentVolume(String dirPath, Map pvMap) throws Exception {
+  /**
+   * Create PV directory and k8s pv and pvc for the domain.
+   *
+   * @param dirPath directory path
+   * @param pvMap PV map
+   * @throws Exception exception
+   */
+  public PersistentVolume(String dirPath, Map<String, Object> pvMap) throws Exception {
     this.dirPath = dirPath;
     this.pvMap = pvMap;
-
-    String cmd =
-        BaseTest.getProjectRoot()
-            + "/src/integration-tests/bash/job.sh \"mkdir -p "
-            + dirPath
-            + "\"";
-    ExecResult result = ExecCommand.exec(cmd);
-    if (result.exitValue() != 0) {
-      throw new RuntimeException(
-          "FAILURE: command to create domain PV directory "
-              + cmd
-              + " failed, returned "
-              + result.stdout()
-              + result.stderr());
+    UUID uuid = UUID.randomUUID();
+    String userProjectsDir = (String) pvMap.get("userProjectsDir");
+    String pvRoot = (String) pvMap.get("pvRoot");
+    String cmd;
+    if (BaseTest.OPENSHIFT) {
+      cmd = "mkdir -m 777 -p " + dirPath;
+    } else {
+      cmd =
+          BaseTest.getProjectRoot()
+              + "/src/integration-tests/bash/krun.sh -m " + pvRoot
+              + ":/shareddir-" + uuid + " -t 120 -p pod-"
+              + uuid + " -c 'mkdir -m 777 -p "
+              + dirPath.replace(pvRoot, "/shareddir-" + uuid + "/")
+              + "'";
     }
-    logger.info("command result " + result.stdout().trim());
+    // retry logic for PV dir creation as sometimes krun.sh fails
+    int cnt = 0;
+    int maxCnt = 10;
+    while (cnt < maxCnt) {
+      LoggerHelper.getLocal().log(Level.INFO, "Executing command " + cmd);
+      ExecResult result = ExecCommand.exec(cmd);
+      if (result.exitValue() == 0) {
+        break;
+      } else {
+        LoggerHelper.getLocal().log(Level.INFO,
+            "PV dir creation command failed with exitValue= " + result.exitValue()
+                + "stderr= " + result.stderr() + " stdout=" + result.stdout());
+        Thread.sleep(BaseTest.getWaitTimePod());
+        cnt = cnt + 1;
+      }
+      if (cnt == maxCnt) {
+        throw new RuntimeException("FAILED: Failed to create PV directory");
+      }
+    }
 
     Path parentDir =
         pvMap.get("domainUID") != null
             ? Files.createDirectories(
-                Paths.get(BaseTest.getUserProjectsDir() + "/pv-pvcs/" + pvMap.get("domainUID")))
-            : Files.createDirectories(Paths.get(BaseTest.getUserProjectsDir() + "/pv-pvcs/"));
+            Paths.get(userProjectsDir + "/pv-pvcs/" + pvMap.get("domainUID")))
+            : Files.createDirectories(Paths.get(userProjectsDir + "/pv-pvcs/"));
 
     // generate input yaml
     TestUtils.createInputFile(pvMap, parentDir + "/" + pvMap.get("baseName") + "-pv-inputs.yaml");
 
     // create PV/PVC
     String cmdPvPvc =
-        BaseTest.getProjectRoot()
-            + "/kubernetes/samples/scripts/create-weblogic-domain-pv-pvc/create-pv-pvc.sh "
+        userProjectsDir + "/.."
+            // + "/" + (pvMap.containsKey("domainUID") ? pvMap.get("domainUID") : "")
+            + "/samples/scripts/create-weblogic-domain-pv-pvc/create-pv-pvc.sh "
             + " -i "
             + parentDir
             + "/"
             + pvMap.get("baseName")
             + "-pv-inputs.yaml -e -o "
-            + BaseTest.getUserProjectsDir();
-    logger.info("Executing cmd " + cmdPvPvc);
+            + userProjectsDir;
+    LoggerHelper.getLocal().log(Level.INFO, "Executing cmd " + cmdPvPvc);
 
-    result = ExecCommand.exec(cmdPvPvc);
-    if (result.exitValue() != 0) {
-      throw new RuntimeException(
-          "FAILURE: command to create PV/PVC "
-              + cmdPvPvc
-              + " failed, returned "
-              + result.stdout()
-              + result.stderr());
-    }
-    logger.info("command result " + result.stdout().trim());
+    TestUtils.execOrAbortProcess(cmdPvPvc, true);
   }
 
   public String getDirPath() {
     return dirPath;
   }
 
-  public Map getPvMap() {
+  public Map<String, Object> getPvMap() {
     return pvMap;
   }
+
 }

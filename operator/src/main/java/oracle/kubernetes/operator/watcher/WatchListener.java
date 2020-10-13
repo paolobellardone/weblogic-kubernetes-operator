@@ -1,13 +1,12 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.watcher;
 
 import io.kubernetes.client.util.Watch;
 
 /**
- * This interface is used for the final destination to deliver watch events
+ * This interface is used for the final destination to deliver watch events.
  *
  * @param <T> The type of the object that is being watched.
  */

@@ -1,24 +1,24 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.rest;
 
-import io.kubernetes.client.util.SSLUtils;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.security.SecureRandom;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.SSLContext;
+
+import io.kubernetes.client.util.SSLUtils;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
+import oracle.kubernetes.operator.rest.resource.VersionsResource;
 import oracle.kubernetes.operator.work.Container;
 import oracle.kubernetes.operator.work.ContainerResolver;
 import org.apache.commons.codec.binary.Base64;
@@ -48,20 +48,17 @@ import org.glassfish.jersey.server.filter.CsrfProtectionFilter;
 public class RestServer {
   private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
   private static final int CORE_POOL_SIZE = 3;
-
-  private RestConfig config;
-
-  // private String baseHttpUri;
-  private String baseExternalHttpsUri;
-  private String baseInternalHttpsUri;
-
-  HttpServer externalHttpsServer;
-  HttpServer internalHttpsServer;
-
   private static final String SSL_PROTOCOL = "TLSv1.2";
   private static final String[] SSL_PROTOCOLS = {
     SSL_PROTOCOL
   }; // ONLY support TLSv1.2 (by default, we would get TLSv1 and TLSv1.1 too)
+  private static RestServer INSTANCE = null;
+  private final RestConfig config;
+  // private String baseHttpUri;
+  private final String baseExternalHttpsUri;
+  private final String baseInternalHttpsUri;
+  private HttpServer externalHttpsServer;
+  private HttpServer internalHttpsServer;
 
   /**
    * Constructs the WebLogic Operator REST server.
@@ -70,7 +67,7 @@ public class RestServer {
    *     numbers that the ports run on, the certificates and private keys for ssl, and the backend
    *     implementation that does the real work behind the REST api.
    */
-  public RestServer(RestConfig config) {
+  private RestServer(RestConfig config) {
     LOGGER.entering();
     this.config = config;
     baseExternalHttpsUri = "https://" + config.getHost() + ":" + config.getExternalHttpsPort();
@@ -79,11 +76,96 @@ public class RestServer {
   }
 
   /**
+   * Create singleton instance of the WebLogic Operator's RestServer. Should only be called once.
+   *
+   * @param restConfig - the WebLogic Operator's REST configuration. Throws IllegalStateException if
+   *     instance already created.
+   */
+  public static synchronized void create(RestConfig restConfig) {
+    LOGGER.entering();
+    try {
+      if (INSTANCE == null) {
+        INSTANCE = new RestServer(restConfig);
+        return;
+      }
+
+      throw new IllegalStateException();
+    } finally {
+      LOGGER.exiting();
+    }
+  }
+
+  /**
+   * Accessor for obtaining reference to the RestServer singleton instance.
+   *
+   * @return RestServer - Singleton instance of the RestServer
+   */
+  public static synchronized RestServer getInstance() {
+    return INSTANCE;
+  }
+
+  /**
+   * Release RestServer singleton instance. Should only be called once. Throws IllegalStateException
+   * if singleton instance not created.
+   */
+  public static void destroy() {
+    LOGGER.entering();
+    try {
+      if (INSTANCE != null) {
+        INSTANCE = null;
+        return;
+      }
+
+      throw new IllegalStateException();
+    } finally {
+      LOGGER.exiting();
+    }
+  }
+
+  /**
+   * Defines a resource configuration that scans for JAX-RS resources and providers in the REST
+   * package.
+   *
+   * @param restConfig the operator REST configuration
+   * @return a resource configuration
+   */
+  static ResourceConfig createResourceConfig(RestConfig restConfig) {
+    ResourceConfig rc =
+        new ResourceConfig()
+            .register(JacksonFeature.class)
+            .register(CsrfProtectionFilter.class)
+            .register(ErrorFilter.class)
+            .register(AuthenticationFilter.class)
+            .register(RequestDebugLoggingFilter.class)
+            .register(ResponseDebugLoggingFilter.class)
+            .register(ExceptionMapper.class)
+            .packages(VersionsResource.class.getPackageName());
+    rc.setProperties(Map.of(RestConfig.REST_CONFIG_PROPERTY, restConfig));
+    return rc;
+  }
+
+  private ResourceConfig createResourceConfig() {
+    LOGGER.entering();
+
+    ResourceConfig rc = createResourceConfig(config);
+
+    LOGGER.exiting();
+    return rc;
+  }
+
+  private static byte[] readFromDataOrFile(String data, String file) throws IOException {
+    if (data != null && data.length() > 0) {
+      return Base64.decodeBase64(data);
+    }
+    return Files.readAllBytes(new File(file).toPath());
+  }
+
+  /**
    * Returns the in-pod URI of the externally available https REST port.
    *
    * @return the uri
    */
-  public String getExternalHttpsUri() {
+  String getExternalHttpsUri() {
     return baseExternalHttpsUri;
   }
 
@@ -92,7 +174,7 @@ public class RestServer {
    *
    * @return the uri
    */
-  public String getInternalHttpsUri() {
+  String getInternalHttpsUri() {
     return baseInternalHttpsUri;
   }
 
@@ -102,10 +184,10 @@ public class RestServer {
    * <p>If a port has not been configured, then it logs that fact, does not start that port, and
    * continues (v.s. throwing an exception and not starting any ports).
    *
+   * @param container Container
    * @throws Exception if the REST api could not be started for reasons other than a port was not
    *     configured. When an exception is thrown, then none of the ports will be leftrunning,
    *     however it is still OK to call stop (which will be a no-op).
-   * @param container Container
    */
   public void start(Container container) throws Exception {
     LOGGER.entering();
@@ -114,25 +196,25 @@ public class RestServer {
     }
     boolean fullyStarted = false;
     try {
-      if (isExternalSSLConfigured()) {
+      if (isExternalSslConfigured()) {
         externalHttpsServer = createExternalHttpsServer(container);
         LOGGER.info(
             "Started the external ssl REST server on "
                 + getExternalHttpsUri()
                 + "/operator"); // TBD .fine ?
       } else {
-        LOGGER.info(
+        LOGGER.fine(
             "Did not start the external ssl REST server because external ssl has not been configured.");
       }
 
-      if (isInternalSSLConfigured()) {
+      if (isInternalSslConfigured()) {
         internalHttpsServer = createInternalHttpsServer(container);
         LOGGER.info(
             "Started the internal ssl REST server on "
                 + getInternalHttpsUri()
                 + "/operator"); // TBD .fine ?
       } else {
-        LOGGER.info(
+        LOGGER.fine(
             "Did not start the internal ssl REST server because internal ssl has not been configured.");
       }
 
@@ -158,12 +240,12 @@ public class RestServer {
     if (externalHttpsServer != null) {
       externalHttpsServer.shutdownNow();
       externalHttpsServer = null;
-      LOGGER.info("Stopped the external ssl REST server"); // TBD .fine ?
+      LOGGER.fine("Stopped the external ssl REST server");
     }
     if (internalHttpsServer != null) {
       internalHttpsServer.shutdownNow();
       internalHttpsServer = null;
-      LOGGER.info("Stopped the internal ssl REST server"); // TBD .fine ?
+      LOGGER.fine("Stopped the internal ssl REST server");
     }
     LOGGER.exiting();
   }
@@ -173,7 +255,7 @@ public class RestServer {
     HttpServer result =
         createHttpsServer(
             container,
-            createSSLContext(
+            createSslContext(
                 createKeyManagers(
                     config.getOperatorExternalCertificateData(),
                     config.getOperatorExternalCertificateFile(),
@@ -189,7 +271,7 @@ public class RestServer {
     HttpServer result =
         createHttpsServer(
             container,
-            createSSLContext(
+            createSslContext(
                 createKeyManagers(
                     config.getOperatorInternalCertificateData(),
                     config.getOperatorInternalCertificateFile(),
@@ -272,32 +354,7 @@ public class RestServer {
     return h;
   }
 
-  private ResourceConfig createResourceConfig() {
-    LOGGER.entering();
-    // create a resource config that scans for JAX-RS resources and providers
-    // in oracle.kubernetes.operator.rest package
-    ResourceConfig rc =
-        new ResourceConfig()
-            .register(JacksonFeature.class)
-            .register(CsrfProtectionFilter.class)
-            .register(ErrorFilter.class)
-            .register(AuthenticationFilter.class)
-            .register(RequestDebugLoggingFilter.class)
-            .register(ResponseDebugLoggingFilter.class)
-            .register(ExceptionMapper.class)
-            .packages("oracle.kubernetes.operator.rest.resource");
-    Map<String, Object> extraProps = new HashMap<>();
-
-    // attach the rest backend impl to the resource config
-    // so that the resource impls can find it
-    extraProps.put(RestConfig.REST_CONFIG_PROPERTY, config);
-    rc.addProperties(extraProps);
-
-    LOGGER.exiting();
-    return rc;
-  }
-
-  private SSLContext createSSLContext(KeyManager[] kms) throws Exception {
+  private SSLContext createSslContext(KeyManager[] kms) throws Exception {
     SSLContext ssl = SSLContext.getInstance(SSL_PROTOCOL);
     ssl.init(kms, null, new SecureRandom());
     return ssl;
@@ -321,35 +378,28 @@ public class RestServer {
     return result;
   }
 
-  private static byte[] readFromDataOrFile(String data, String file) throws IOException {
-    if (data != null && data.length() > 0) {
-      return Base64.decodeBase64(data);
-    }
-    return Files.readAllBytes(new File(file).toPath());
-  }
-
-  private boolean isExternalSSLConfigured() {
-    return isSSLConfigured(
+  private boolean isExternalSslConfigured() {
+    return isSslConfigured(
         config.getOperatorExternalCertificateData(),
         config.getOperatorExternalCertificateFile(),
         config.getOperatorExternalKeyData(),
         config.getOperatorExternalKeyFile());
   }
 
-  private boolean isInternalSSLConfigured() {
-    return isSSLConfigured(
+  private boolean isInternalSslConfigured() {
+    return isSslConfigured(
         config.getOperatorInternalCertificateData(),
         config.getOperatorInternalCertificateFile(),
         config.getOperatorInternalKeyData(),
         config.getOperatorInternalKeyFile());
   }
 
-  private boolean isSSLConfigured(
+  private boolean isSslConfigured(
       String certificateData, String certificateFile, String keyData, String keyFile) {
     // don't log keyData since it can contain sensitive data
     LOGGER.entering(certificateData, certificateFile, keyFile);
-    boolean certConfigured = isPEMConfigured(certificateData, certificateFile);
-    boolean keyConfigured = isPEMConfigured(keyData, keyFile);
+    boolean certConfigured = isPemConfigured(certificateData, certificateFile);
+    boolean keyConfigured = isPemConfigured(keyData, keyFile);
     LOGGER.finer("certConfigured=" + certConfigured);
     LOGGER.finer("keyConfigured=" + keyConfigured);
     boolean result = (certConfigured && keyConfigured);
@@ -357,7 +407,7 @@ public class RestServer {
     return result;
   }
 
-  private boolean isPEMConfigured(String data, String path) {
+  private boolean isPemConfigured(String data, String path) {
     boolean result = false;
     if (data != null && data.length() > 0) {
       result = true;

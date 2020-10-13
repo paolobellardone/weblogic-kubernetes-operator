@@ -1,13 +1,13 @@
-# Copyright 2018, Oracle Corporation and/or its affiliates. All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.a
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 import sys
-import os
+import os, re
 
 #
 # This program verifies that bean attr values are expected values,
 # it can be used to demonstrate situational config overrides.
-# 
+#
 # Usage:
 #
 #   Create a file with lines of format:
@@ -17,16 +17,16 @@ import os
 #      /Servers/admin-server,ListenAddress,,domain1-admin-server
 #
 #   Special values '*' and '!':
-# 
+#
 #      original-val=*
 #      If you don't want to check the original-val is a specific
 #      expected value, then specify an asterisk (*) instead
 #      of the expected value.
 #
 #      overridden-val=!
-#      If you don't want to check that the overridden-val is a specific 
+#      If you don't want to check that the overridden-val is a specific
 #      expected val, but only want to assert that it's different than
-#      the original-val, then specify a bang (!) instead of the 
+#      the original-val, then specify a bang (!) instead of the
 #      expected value.
 #
 #   Then run this program:
@@ -44,12 +44,12 @@ import os
 #
 #   The program exits with a non-zero exit code on any failure
 #   (including an unexpected attribute value).
-# 
+#
 # Sample usage in an Operator k8s WL pod:
-#   Assumptions:  
-#        Assumes a configuration with 'admin-server' listen-address of localhost, and 
+#   Assumptions:
+#        Assumes a configuration with 'admin-server' listen-address of localhost, and
 #        'managed-server1' listen-address of localhost, and assumes that these have
-#         been overridden by sit-cfg to be 'domain1-admin-server' and 
+#         been overridden by sit-cfg to be 'domain1-admin-server' and
 #        'domain1-managed-server1' respectively.
 #
 #   test_home=/tmp/introspect
@@ -91,6 +91,29 @@ errors=[]
 def addError(err):
   errors.append(err)
 
+def checkNAPInDomainConfig(path):
+  """
+  Check to see if there is a network access points defined in the domainConfig tree
+  Avoid getting cd exception by navigating the tree using ls()
+
+  :param path:
+  :return:  domainConfig nap path, true if the test path is istio network access points
+  """
+  rep=re.compile('/(?:Servers|ServerTemplates)/.*/NetworkAccessPoints/(?:tcp-|http-|tls-|https-)')
+  match = False
+  if re.match(rep, path):
+    match = True
+    path_tokens = path.split('/')
+    nap_path = '/'.join(path_tokens[:len(path_tokens)-1])
+    nap_list = ls(nap_path, returnMap='true')
+    if path_tokens[-1] in nap_list:
+      return path_tokens[-1], match
+    else:
+      return None, match
+  else:
+    return None, match
+
+
 file = open(input_file, 'r')
 
 line_no=0
@@ -118,8 +141,14 @@ for line in file:
   )
 
   domainConfig()
-  cd(bean_path)
-  originalActual=str(get(attr))
+  existing_istio_paths, is_istio_testpath = checkNAPInDomainConfig(bean_path)
+  # if it is an istio test path from the input file
+  # and not actually in the domain config (add case)
+  if is_istio_testpath and existing_istio_paths is None:
+    originalActual = originalExpected
+  else:
+    cd(bean_path)
+    originalActual=str(get(attr))
   serverConfig()
   cd(bean_path)
   overriddenActual=str(get(attr))
@@ -130,7 +159,7 @@ for line in file:
     addError(
       "Error: got '" + originalActual + "'"
              + " but expected value '" + originalExpected + "'"
-             + " for bean_path=domainConfig/" + bean_path 
+             + " for bean_path=domainConfig/" + bean_path
              + " attr='" + attr + "'. "
     )
 
@@ -139,7 +168,7 @@ for line in file:
     addError(
       "Error: got '" + overriddenActual + "'"
              + " but expected value '" + overriddenExpected + "'"
-             + " for bean_path=serverConfig/" + bean_path 
+             + " for bean_path=serverConfig/" + bean_path
              + " attr='" + attr + "'. "
     )
 
@@ -148,7 +177,7 @@ for line in file:
     addError(
       "Error: expected original value and actual value to differ "
              + " but got value '" + originalActual + "' for both"
-             + " for bean_path=serverConfig/" + bean_path 
+             + " for bean_path=serverConfig/" + bean_path
              + " attr='" + attr + "'. "
     )
 
@@ -158,7 +187,7 @@ for line in file:
     + " originalExpected/Actual='" + originalExpected + "'/'" + originalActual + "'"
     + " overriddenExpected/Actual='" + overriddenExpected + "'/'" + overriddenActual + "'"
   )
-file.close()		
+file.close()
 
 if len(errors) > 0:
   print "Found " + str(len(errors)) + " errors:"

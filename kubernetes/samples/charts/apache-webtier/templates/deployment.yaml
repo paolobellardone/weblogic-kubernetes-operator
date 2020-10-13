@@ -1,25 +1,22 @@
-# Copyright 2018 Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 kind: Deployment
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 metadata:
   name: {{ template "apache.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     app: {{ template "apache.fullname" . }}
-    release: "{{ .Release.Name }}"
 spec:
   replicas: 1
   selector:
     matchLabels:
-        app: {{ template "apache.fullname" . }}
-        release: "{{ .Release.Name }}"
+      app: {{ template "apache.fullname" . }}
   template:
     metadata:
       labels:
         app: {{ template "apache.fullname" . }}
-        release: "{{ .Release.Name }}"
     spec:
       serviceAccountName: {{ template "apache.serviceAccountName" . }}
       terminationGracePeriodSeconds: 60
@@ -39,7 +36,7 @@ spec:
 {{- end }}
       containers:
       - name: {{ template "apache.fullname" . }}
-        image: "{{ .Values.imageRegistry }}/{{ .Values.image }}:{{ .Values.imageTag }}"
+        image: {{ .Values.image | quote }}
         imagePullPolicy: {{ .Values.imagePullPolicy | quote }}
 {{- if or (and (.Values.virtualHostName) (.Values.customCert)) (.Values.volumePath) }}
         volumeMounts:

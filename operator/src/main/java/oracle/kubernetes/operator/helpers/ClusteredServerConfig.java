@@ -1,12 +1,12 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helpers;
 
-import io.kubernetes.client.models.V1EnvVar;
-import io.kubernetes.client.models.V1LocalObjectReference;
 import java.util.List;
+
+import io.kubernetes.client.openapi.models.V1EnvVar;
+import io.kubernetes.client.openapi.models.V1LocalObjectReference;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -80,89 +80,45 @@ public class ClusteredServerConfig extends ServerConfig {
     return this;
   }
 
-  /** {@inheritDoc} */
   @Override
   public ClusteredServerConfig withServerName(String serverName) {
     super.withServerName(serverName);
     return this;
   }
 
-  /** {@inheritDoc} */
-  @Override
-  public ClusteredServerConfig withStartedServerState(String startedServerState) {
-    super.withStartedServerState(startedServerState);
-    return this;
-  }
-
-  /** {@inheritDoc} */
   @Override
   public ClusteredServerConfig withRestartedLabel(String restartedLabel) {
     super.withRestartedLabel(restartedLabel);
     return this;
   }
 
-  /** {@inheritDoc} */
   @Override
   public ClusteredServerConfig withNodePort(int nodePort) {
     super.withNodePort(nodePort);
     return this;
   }
 
-  /** {@inheritDoc} */
   @Override
   public ClusteredServerConfig withEnv(List<V1EnvVar> env) {
     super.withEnv(env);
     return this;
   }
 
-  /** {@inheritDoc} */
   @Override
   public ClusteredServerConfig withImage(String image) {
     super.withImage(image);
     return this;
   }
 
-  /** {@inheritDoc} */
   @Override
   public ClusteredServerConfig withImagePullPolicy(String imagePullPolicy) {
     super.withImagePullPolicy(imagePullPolicy);
     return this;
   }
 
-  /** {@inheritDoc} */
   @Override
   public ClusteredServerConfig withImagePullSecrets(List<V1LocalObjectReference> imagePullSecrets) {
     super.withImagePullSecrets(imagePullSecrets);
-    return this;
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  public ClusteredServerConfig withShutdownPolicy(String shutdownPolicy) {
-    super.withShutdownPolicy(shutdownPolicy);
-    return this;
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  public ClusteredServerConfig withGracefulShutdownTimeout(int gracefulShutdownTimeout) {
-    super.withGracefulShutdownTimeout(gracefulShutdownTimeout);
-    return this;
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  public ClusteredServerConfig withGracefulShutdownIgnoreSessions(
-      boolean gracefulShutdownIgnoreSessions) {
-    super.withGracefulShutdownIgnoreSessions(gracefulShutdownIgnoreSessions);
-    return this;
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  public ClusteredServerConfig withGracefulShutdownWaitForSessions(
-      boolean gracefulShutdownWaitForSessions) {
-    super.withGracefulShutdownWaitForSessions(gracefulShutdownWaitForSessions);
     return this;
   }
 

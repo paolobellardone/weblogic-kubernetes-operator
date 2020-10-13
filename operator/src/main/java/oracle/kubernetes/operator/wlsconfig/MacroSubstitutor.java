@@ -1,6 +1,5 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.wlsconfig;
 
@@ -36,7 +35,7 @@ public class MacroSubstitutor {
   private final String machineName;
 
   /**
-   * Creates a MacroSubstitutor with the given macro values that will be used in macro substitution
+   * Creates a MacroSubstitutor with the given macro values that will be used in macro substitution.
    *
    * @param id Value for replacing values in ${id} macro
    * @param serverName Value for replacing values in ${serverName} macro
@@ -54,7 +53,7 @@ public class MacroSubstitutor {
   }
 
   /**
-   * Perform macro substitution. Extracts the macro name and resolves its macro value using values
+   * Perform macro substitution. Extracts the macro name and resolves its macro value using values.
    * specified in this MacroSubstitutor.
    *
    * @param inputValue String containing macros
@@ -101,7 +100,7 @@ public class MacroSubstitutor {
   }
 
   /**
-   * Return value for the given macro
+   * Return value for the given macro.
    *
    * @param macro Macro to be substituted
    * @return Value for the macro

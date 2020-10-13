@@ -1,23 +1,22 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.steps;
 
 import oracle.kubernetes.operator.work.NextAction;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
+import oracle.kubernetes.weblogic.domain.model.Domain;
 
 public class DomainPresenceStep extends Step {
 
-  private DomainPresenceStep(Step adminStep) {
-    super(adminStep);
+  private DomainPresenceStep(Step domainUpSteps) {
+    super(domainUpSteps);
   }
 
   public static DomainPresenceStep createDomainPresenceStep(
-      Domain dom, Step adminStep, Step managedServerStep) {
-    return new DomainPresenceStep(dom.isShuttingDown() ? managedServerStep : adminStep);
+      Domain dom, Step domainUpSteps, Step managedServerStep) {
+    return new DomainPresenceStep(dom.isShuttingDown() ? managedServerStep : domainUpSteps);
   }
 
   @Override

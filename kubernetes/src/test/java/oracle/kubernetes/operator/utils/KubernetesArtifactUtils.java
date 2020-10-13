@@ -1,8 +1,11 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 import com.appscode.voyager.client.models.V1beta1HTTPIngressBackend;
 import com.appscode.voyager.client.models.V1beta1HTTPIngressPath;
@@ -12,80 +15,79 @@ import com.appscode.voyager.client.models.V1beta1IngressRule;
 import com.appscode.voyager.client.models.V1beta1IngressSpec;
 import io.kubernetes.client.custom.IntOrString;
 import io.kubernetes.client.custom.Quantity;
-import io.kubernetes.client.models.ApiregistrationV1beta1ServiceReference;
-import io.kubernetes.client.models.ExtensionsV1beta1Deployment;
-import io.kubernetes.client.models.ExtensionsV1beta1DeploymentSpec;
-import io.kubernetes.client.models.V1ClusterRole;
-import io.kubernetes.client.models.V1ClusterRoleBinding;
-import io.kubernetes.client.models.V1ConfigMap;
-import io.kubernetes.client.models.V1ConfigMapVolumeSource;
-import io.kubernetes.client.models.V1Container;
-import io.kubernetes.client.models.V1ContainerPort;
-import io.kubernetes.client.models.V1EmptyDirVolumeSource;
-import io.kubernetes.client.models.V1EnvVar;
-import io.kubernetes.client.models.V1EnvVarSource;
-import io.kubernetes.client.models.V1ExecAction;
-import io.kubernetes.client.models.V1HTTPGetAction;
-import io.kubernetes.client.models.V1Handler;
-import io.kubernetes.client.models.V1HostPathVolumeSource;
-import io.kubernetes.client.models.V1Job;
-import io.kubernetes.client.models.V1JobSpec;
-import io.kubernetes.client.models.V1LabelSelector;
-import io.kubernetes.client.models.V1Lifecycle;
-import io.kubernetes.client.models.V1LocalObjectReference;
-import io.kubernetes.client.models.V1NFSVolumeSource;
-import io.kubernetes.client.models.V1Namespace;
-import io.kubernetes.client.models.V1ObjectFieldSelector;
-import io.kubernetes.client.models.V1ObjectMeta;
-import io.kubernetes.client.models.V1PersistentVolume;
-import io.kubernetes.client.models.V1PersistentVolumeClaim;
-import io.kubernetes.client.models.V1PersistentVolumeClaimList;
-import io.kubernetes.client.models.V1PersistentVolumeClaimSpec;
-import io.kubernetes.client.models.V1PersistentVolumeClaimVolumeSource;
-import io.kubernetes.client.models.V1PersistentVolumeSpec;
-import io.kubernetes.client.models.V1Pod;
-import io.kubernetes.client.models.V1PodSpec;
-import io.kubernetes.client.models.V1PodTemplateSpec;
-import io.kubernetes.client.models.V1PolicyRule;
-import io.kubernetes.client.models.V1Probe;
-import io.kubernetes.client.models.V1ResourceRequirements;
-import io.kubernetes.client.models.V1Role;
-import io.kubernetes.client.models.V1RoleBinding;
-import io.kubernetes.client.models.V1RoleRef;
-import io.kubernetes.client.models.V1Secret;
-import io.kubernetes.client.models.V1SecretReference;
-import io.kubernetes.client.models.V1SecretVolumeSource;
-import io.kubernetes.client.models.V1Service;
-import io.kubernetes.client.models.V1ServiceAccount;
-import io.kubernetes.client.models.V1ServicePort;
-import io.kubernetes.client.models.V1ServiceSpec;
-import io.kubernetes.client.models.V1Subject;
-import io.kubernetes.client.models.V1TCPSocketAction;
-import io.kubernetes.client.models.V1Toleration;
-import io.kubernetes.client.models.V1Volume;
-import io.kubernetes.client.models.V1VolumeMount;
-import io.kubernetes.client.models.V1beta1APIService;
-import io.kubernetes.client.models.V1beta1APIServiceSpec;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
-import oracle.kubernetes.weblogic.domain.v2.DomainSpec;
+import io.kubernetes.client.openapi.models.ApiregistrationV1beta1ServiceReference;
+import io.kubernetes.client.openapi.models.V1ClusterRole;
+import io.kubernetes.client.openapi.models.V1ClusterRoleBinding;
+import io.kubernetes.client.openapi.models.V1ConfigMap;
+import io.kubernetes.client.openapi.models.V1ConfigMapVolumeSource;
+import io.kubernetes.client.openapi.models.V1Container;
+import io.kubernetes.client.openapi.models.V1ContainerPort;
+import io.kubernetes.client.openapi.models.V1Deployment;
+import io.kubernetes.client.openapi.models.V1DeploymentSpec;
+import io.kubernetes.client.openapi.models.V1EmptyDirVolumeSource;
+import io.kubernetes.client.openapi.models.V1EnvVar;
+import io.kubernetes.client.openapi.models.V1EnvVarSource;
+import io.kubernetes.client.openapi.models.V1ExecAction;
+import io.kubernetes.client.openapi.models.V1HTTPGetAction;
+import io.kubernetes.client.openapi.models.V1Handler;
+import io.kubernetes.client.openapi.models.V1HostPathVolumeSource;
+import io.kubernetes.client.openapi.models.V1Job;
+import io.kubernetes.client.openapi.models.V1JobSpec;
+import io.kubernetes.client.openapi.models.V1LabelSelector;
+import io.kubernetes.client.openapi.models.V1Lifecycle;
+import io.kubernetes.client.openapi.models.V1LocalObjectReference;
+import io.kubernetes.client.openapi.models.V1NFSVolumeSource;
+import io.kubernetes.client.openapi.models.V1Namespace;
+import io.kubernetes.client.openapi.models.V1ObjectFieldSelector;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1PersistentVolume;
+import io.kubernetes.client.openapi.models.V1PersistentVolumeClaim;
+import io.kubernetes.client.openapi.models.V1PersistentVolumeClaimList;
+import io.kubernetes.client.openapi.models.V1PersistentVolumeClaimSpec;
+import io.kubernetes.client.openapi.models.V1PersistentVolumeClaimVolumeSource;
+import io.kubernetes.client.openapi.models.V1PersistentVolumeSpec;
+import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.openapi.models.V1PodSpec;
+import io.kubernetes.client.openapi.models.V1PodTemplateSpec;
+import io.kubernetes.client.openapi.models.V1PolicyRule;
+import io.kubernetes.client.openapi.models.V1Probe;
+import io.kubernetes.client.openapi.models.V1ResourceRequirements;
+import io.kubernetes.client.openapi.models.V1Role;
+import io.kubernetes.client.openapi.models.V1RoleBinding;
+import io.kubernetes.client.openapi.models.V1RoleRef;
+import io.kubernetes.client.openapi.models.V1Secret;
+import io.kubernetes.client.openapi.models.V1SecretReference;
+import io.kubernetes.client.openapi.models.V1SecretVolumeSource;
+import io.kubernetes.client.openapi.models.V1Service;
+import io.kubernetes.client.openapi.models.V1ServiceAccount;
+import io.kubernetes.client.openapi.models.V1ServicePort;
+import io.kubernetes.client.openapi.models.V1ServiceSpec;
+import io.kubernetes.client.openapi.models.V1Subject;
+import io.kubernetes.client.openapi.models.V1TCPSocketAction;
+import io.kubernetes.client.openapi.models.V1Toleration;
+import io.kubernetes.client.openapi.models.V1Volume;
+import io.kubernetes.client.openapi.models.V1VolumeMount;
+import io.kubernetes.client.openapi.models.V1beta1APIService;
+import io.kubernetes.client.openapi.models.V1beta1APIServiceSpec;
+import oracle.kubernetes.operator.KubernetesConstants;
+import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.DomainSpec;
 import org.hamcrest.Description;
 import org.hamcrest.TypeSafeDiagnosingMatcher;
 
-/** Utilities to help construct and manage kubernetes artifacts */
+/**
+ * Utilities to help construct and manage kubernetes artifacts.
+ */
 public class KubernetesArtifactUtils {
 
   public static final String API_GROUP_RBAC = "rbac.authorization.k8s.io";
 
-  public static final String API_VERSION_APPS_V1BETA1 = "apps/v1beta1";
+  public static final String API_VERSION_APPS_V1 = "apps/v1";
   public static final String API_VERSION_BATCH_V1 = "batch/v1";
-  public static final String API_VERSION_EXTENSIONS_V1BETA1 = "extensions/v1beta1";
   public static final String API_VERSION_REGISTRATION_V1BETA1 = "apiregistration.k8s.io/v1beta1";
   public static final String API_VERSION_RBAC_V1 = API_GROUP_RBAC + "/v1";
-  public static final String API_VERSION_RBAC_V1BETA1 = API_GROUP_RBAC + "/v1beta1";
-  public static final String API_VERSION_ORACLE_V2 = "weblogic.oracle/v2";
+  public static final String API_VERSION_WEBLOGIC_ORACLE =
+      KubernetesConstants.DOMAIN_GROUP + "/" + KubernetesConstants.DOMAIN_VERSION;
   public static final String API_VERSION_V1 = "v1";
   public static final String API_VERSION_VOYAGER_V1BETA1 = "voyager.appscode.com/v1beta1";
 
@@ -115,12 +117,16 @@ public class KubernetesArtifactUtils {
   }
 
   public static Domain newDomain() {
-    return (new Domain()).withApiVersion(API_VERSION_ORACLE_V2).withKind(KIND_DOMAIN);
+    return (new Domain()).withApiVersion(API_VERSION_WEBLOGIC_ORACLE).withKind(KIND_DOMAIN);
   }
 
-  public static ExtensionsV1beta1Deployment newDeployment() {
-    return (new ExtensionsV1beta1Deployment())
-        .apiVersion(API_VERSION_APPS_V1BETA1)
+  /**
+   * Create deployment.
+   * @return deployment
+   */
+  public static V1Deployment newDeployment() {
+    return (new V1Deployment())
+        .apiVersion(API_VERSION_APPS_V1)
         .kind(KIND_DEPLOYMENT);
   }
 
@@ -136,6 +142,10 @@ public class KubernetesArtifactUtils {
     return (new V1PersistentVolume()).apiVersion(API_VERSION_V1).kind(KIND_PERSISTENT_VOLUME);
   }
 
+  /**
+   * Create persistent volume claim.
+   * @return persistent volume claim
+   */
   public static V1PersistentVolumeClaim newPersistentVolumeClaim() {
     return (new V1PersistentVolumeClaim())
         .apiVersion(API_VERSION_V1)
@@ -158,13 +168,17 @@ public class KubernetesArtifactUtils {
     return (new V1Secret()).apiVersion(API_VERSION_V1).kind(KIND_SECRET);
   }
 
-  public static V1beta1APIService newAPIService() {
+  /**
+   * Create API service.
+   * @return API service
+   */
+  public static V1beta1APIService newApiService() {
     return (new V1beta1APIService())
         .apiVersion(API_VERSION_REGISTRATION_V1BETA1)
         .kind(KIND_API_SERVICE);
   }
 
-  public static V1beta1APIServiceSpec newAPIServiceSpec() {
+  public static V1beta1APIServiceSpec newApiServiceSpec() {
     return new V1beta1APIServiceSpec();
   }
 
@@ -176,15 +190,15 @@ public class KubernetesArtifactUtils {
     return (new V1beta1Ingress()).apiVersion(API_VERSION_VOYAGER_V1BETA1).kind(KIND_INGRESS);
   }
 
-  public static V1beta1HTTPIngressBackend newHTTPIngressBackend() {
+  public static V1beta1HTTPIngressBackend newHttpIngressBackend() {
     return new V1beta1HTTPIngressBackend();
   }
 
-  public static V1beta1HTTPIngressPath newHTTPIngressPath() {
+  public static V1beta1HTTPIngressPath newHttpIngressPath() {
     return new V1beta1HTTPIngressPath();
   }
 
-  public static V1beta1HTTPIngressRuleValue newHTTPIngressRuleValue() {
+  public static V1beta1HTTPIngressRuleValue newHttpIngressRuleValue() {
     return new V1beta1HTTPIngressRuleValue();
   }
 
@@ -204,6 +218,10 @@ public class KubernetesArtifactUtils {
     return (new V1ClusterRole()).apiVersion(API_VERSION_RBAC_V1).kind(KIND_CLUSTER_ROLE);
   }
 
+  /**
+   * Create cluster role binding.
+   * @return cluster role binding
+   */
   public static V1ClusterRoleBinding newClusterRoleBinding() {
     return (new V1ClusterRoleBinding())
         .apiVersion(API_VERSION_RBAC_V1)
@@ -230,8 +248,8 @@ public class KubernetesArtifactUtils {
     return new V1ObjectMeta();
   }
 
-  public static ExtensionsV1beta1DeploymentSpec newDeploymentSpec() {
-    return new ExtensionsV1beta1DeploymentSpec();
+  public static V1DeploymentSpec newDeploymentSpec() {
+    return new V1DeploymentSpec();
   }
 
   public static V1JobSpec newJobSpec() {
@@ -322,7 +340,7 @@ public class KubernetesArtifactUtils {
     return new V1HostPathVolumeSource();
   }
 
-  public static V1NFSVolumeSource newNFSVolumeSource() {
+  public static V1NFSVolumeSource newNfsVolumeSource() {
     return new V1NFSVolumeSource();
   }
 
@@ -362,11 +380,11 @@ public class KubernetesArtifactUtils {
     return new V1LabelSelector();
   }
 
-  public static V1HTTPGetAction newHTTPGetAction() {
+  public static V1HTTPGetAction newHttpGetAction() {
     return new V1HTTPGetAction();
   }
 
-  public static V1TCPSocketAction newTCPSocketAction() {
+  public static V1TCPSocketAction newTcpSocketAction() {
     return new V1TCPSocketAction();
   }
 
@@ -394,30 +412,22 @@ public class KubernetesArtifactUtils {
     return new FluentArrayList<E>();
   }
 
-  // The weblogic k8s artificats are missing fluent methods for adding items.
-  // Add fluent classes to help with this.
-  @SuppressWarnings("serial")
-  public static class FluentArrayList<E> extends ArrayList<E> {
-    public FluentArrayList<E> addElement(E e) {
-      add(e);
-      return this;
-    }
-  }
-
-  // Some of the k8s artifacts, especially config maps, contain scripts and
-  // configuration files whose values we don't want to hard code into the tests.
-  // However, some parts of these values can be expansions of text from the
-  // inputs files.
-  // For these cases, the general testing pattern is to:
-  // 1) extract the values from the actual k8s artifacts
-  // 2) empty the values in the actual k8s artifacts
-  // 3) create a desired k8s artifact, with empty values
-  // 4) use yamlEqualTo to compare the desired k8s artifact with the actual k8s
-  //    artifact whose values have been extracted and emptied
-  //    (i.e. make sure the rest of the fields of the actual k8s artifact are as expected
-  // 5) if (4) passes, THEN make sure that the extracted value contains the
-  //    expected expanded text (i.e. just test part of the text, not all of it)
-  // This method helps with (1) & (2)
+  /**
+   * Some of the k8s artifacts, especially config maps, contain scripts and // configuration
+   * files whose values we don't want to hard code into the tests. // However, some parts of these
+   * values can be expansions of text from the // inputs files. // For these cases, the general
+   * testing pattern is to: // 1) extract the values from the actual k8s artifacts // 2) empty the
+   * values in the actual k8s artifacts // 3) create a desired k8s artifact, with empty values // 4)
+   * use yamlEqualTo to compare the desired k8s artifact with the actual k8s // artifact whose
+   * values have been extracted and emptied // (i.e. make sure the rest of the fields of the actual
+   * k8s artifact are as expected // 5) if (4) passes, THEN make sure that the extracted value
+   * contains the // expected expanded text (i.e. just test part of the text, not all of it) // This
+   * method helps with (1) & (2).
+   *
+   * @param configMap config map
+   * @param key key
+   * @return data
+   */
   public static String getThenEmptyConfigMapDataValue(V1ConfigMap configMap, String key) {
     if (configMap != null) {
       Map<String, String> data = configMap.getData();
@@ -436,6 +446,16 @@ public class KubernetesArtifactUtils {
 
   public static String toContainsRegExp(String regexp) {
     return ".*" + regexp + ".*";
+  }
+
+  // The weblogic k8s artificats are missing fluent methods for adding items.
+  // Add fluent classes to help with this.
+  @SuppressWarnings("serial")
+  public static class FluentArrayList<E> extends ArrayList<E> {
+    public FluentArrayList<E> addElement(E e) {
+      add(e);
+      return this;
+    }
   }
 
   private static class RegexpsMatcher extends TypeSafeDiagnosingMatcher<String> {

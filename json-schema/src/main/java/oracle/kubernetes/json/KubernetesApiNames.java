@@ -1,16 +1,19 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.json;
 
 class KubernetesApiNames {
 
   public static boolean matches(String className, Class<?> candidateClass) {
-    if (!candidateClass.getName().startsWith("io.kubernetes.client")) return false;
+    if (!candidateClass.getName().startsWith("io.kubernetes.client")) {
+      return false;
+    }
 
     String[] parts = className.split("\\.");
-    if (parts.length < 2) return false;
+    if (parts.length < 2) {
+      return false;
+    }
     String last = parts[parts.length - 1];
     String nextToLast = parts[parts.length - 2];
 

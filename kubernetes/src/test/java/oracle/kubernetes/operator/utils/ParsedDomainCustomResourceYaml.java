@@ -1,11 +1,11 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
 import java.nio.file.Path;
-import oracle.kubernetes.weblogic.domain.v2.Domain;
+
+import oracle.kubernetes.weblogic.domain.model.Domain;
 
 /** Parses a generated domain-custom-resource.yaml file into a set of typed k8s java objects */
 public class ParsedDomainCustomResourceYaml extends ParsedKubernetesYaml {
@@ -23,7 +23,7 @@ public class ParsedDomainCustomResourceYaml extends ParsedKubernetesYaml {
   }
 
   public Domain getDomain() {
-    return getDomains().find(inputs.getDomainUID());
+    return getDomains().find(inputs.getDomainUid());
   }
 
   public int getExpectedObjectCount() {

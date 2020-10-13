@@ -1,13 +1,15 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.work;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+
 import oracle.kubernetes.operator.ProcessingConstants;
 import oracle.kubernetes.operator.work.Fiber.CompletionCallback;
 import oracle.kubernetes.operator.work.Fiber.ExitCallback;
@@ -22,16 +24,24 @@ public class FiberGate {
   private final Engine engine;
   private final ConcurrentMap<String, Fiber> gateMap = new ConcurrentHashMap<String, Fiber>();
 
-  private final Fiber PLACEHOLDER;
+  private final Fiber placeholder;
 
   /**
-   * Constructor taking Engine for running Fibers
+   * Constructor taking Engine for running Fibers.
    *
    * @param engine Engine
    */
   public FiberGate(Engine engine) {
     this.engine = engine;
-    this.PLACEHOLDER = engine.createFiber();
+    this.placeholder = engine.createFiber();
+  }
+
+  /**
+   * Access map of current fibers.
+   * @return Map of fibers in this gate
+   */
+  public Map<String, Fiber> getCurrentFibers() {
+    return new HashMap<>(gateMap);
   }
 
   public ScheduledExecutorService getExecutor() {
@@ -64,7 +74,7 @@ public class FiberGate {
    */
   public Fiber startFiberIfNoCurrentFiber(
       String key, Step strategy, Packet packet, CompletionCallback callback) {
-    return startFiberIfLastFiberMatches(key, PLACEHOLDER, strategy, packet, callback);
+    return startFiberIfLastFiberMatches(key, placeholder, strategy, packet, callback);
   }
 
   /**
@@ -82,7 +92,7 @@ public class FiberGate {
     Fiber f = engine.createFiber();
     WaitForOldFiberStep wfofs;
     if (old != null) {
-      if (old == PLACEHOLDER) {
+      if (old == placeholder) {
         if (gateMap.putIfAbsent(key, f) != null) {
           return null;
         }
@@ -140,13 +150,13 @@ public class FiberGate {
                     new ExitCallback() {
                       @Override
                       public void onExit() {
-                        current.set(o.getSPI(WaitForOldFiberStep.class));
+                        current.set(o.getSpi(WaitForOldFiberStep.class));
                         fiber.resume(packet);
                       }
                     });
 
             if (!isWillCall) {
-              current.set(o.getSPI(WaitForOldFiberStep.class));
+              current.set(o.getSpi(WaitForOldFiberStep.class));
               fiber.resume(packet);
             }
           });

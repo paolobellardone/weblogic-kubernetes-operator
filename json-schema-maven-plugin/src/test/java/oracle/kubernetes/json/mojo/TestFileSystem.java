@@ -1,10 +1,14 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.json.mojo;
 
-import java.io.*;
+import java.io.File;
+import java.io.FilenameFilter;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringReader;
+import java.io.Writer;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
@@ -16,17 +20,12 @@ import java.util.Set;
 
 public class TestFileSystem extends FileSystem {
 
-  private Map<File, List<File>> directories = new HashMap<File, List<File>>();
-
-  private Map<File, String> contents = new HashMap<File, String>();
-
-  private Set<File> writeOnlyFiles = new HashSet<File>();
-
-  private Map<File, Long> lastModified = new HashMap<File, Long>();
-
-  private Map<File, URL> urls = new HashMap<>();
-
   long lastModificationTime = 0;
+  private Map<File, List<File>> directories = new HashMap<File, List<File>>();
+  private Map<File, String> contents = new HashMap<File, String>();
+  private Set<File> writeOnlyFiles = new HashSet<File>();
+  private Map<File, Long> lastModified = new HashMap<File, Long>();
+  private Map<File, URL> urls = new HashMap<>();
 
   public void touch(File file) {
     setLastModified(file, ++lastModificationTime);
@@ -38,7 +37,9 @@ public class TestFileSystem extends FileSystem {
   }
 
   private void addFileIfNotDefined(File file) {
-    if (contents.containsKey(file)) return;
+    if (contents.containsKey(file)) {
+      return;
+    }
     addToParent(file);
     contents.put(file, "");
   }
@@ -52,7 +53,9 @@ public class TestFileSystem extends FileSystem {
   }
 
   private void addDirectoryIfNotDefined(File dir) {
-    if (directories.containsKey(dir)) return;
+    if (directories.containsKey(dir)) {
+      return;
+    }
     addToParent(dir);
     directories.put(dir, new ArrayList<File>());
   }
@@ -71,12 +74,12 @@ public class TestFileSystem extends FileSystem {
     writeOnlyFiles.add(file);
   }
 
-  void defineURL(File file, URL url) {
+  void defineUrl(File file, URL url) {
     urls.put(file, url);
   }
 
   @Override
-  URL toURL(File file) throws MalformedURLException {
+  URL toUrl(File file) throws MalformedURLException {
     return urls.get(file);
   }
 
@@ -90,8 +93,11 @@ public class TestFileSystem extends FileSystem {
 
   private File[] getDirectoryContents(File directory, FilenameFilter filter) {
     List<File> files = new ArrayList<File>();
-    for (File file : directories.get(directory))
-      if (filter == null || filter.accept(file.getParentFile(), file.getName())) files.add(file);
+    for (File file : directories.get(directory)) {
+      if (filter == null || filter.accept(file.getParentFile(), file.getName())) {
+        files.add(file);
+      }
+    }
     return files.toArray(new File[files.size()]);
   }
 
@@ -112,7 +118,9 @@ public class TestFileSystem extends FileSystem {
   }
 
   void createDirectory(File directory) {
-    if (!isDirectory(directory)) directories.put(directory, new ArrayList<File>());
+    if (!isDirectory(directory)) {
+      directories.put(directory, new ArrayList<File>());
+    }
   }
 
   @Override
@@ -122,8 +130,9 @@ public class TestFileSystem extends FileSystem {
 
   @Override
   Writer createWriter(File file) throws IOException {
-    if (!exists(file.getParentFile()))
+    if (!exists(file.getParentFile())) {
       throw new IOException("Parent directory " + file.getParentFile() + " does not exist");
+    }
     return new TestFileWriter(file);
   }
 
@@ -146,7 +155,8 @@ public class TestFileSystem extends FileSystem {
     }
 
     @Override
-    public void flush() throws IOException {}
+    public void flush() throws IOException {
+    }
 
     @Override
     public void close() throws IOException {
@@ -162,7 +172,8 @@ public class TestFileSystem extends FileSystem {
     }
 
     @Override
-    public void close() throws IOException {}
+    public void close() throws IOException {
+    }
 
     @Override
     public int read(char[] cbuf, int off, int len) throws IOException {

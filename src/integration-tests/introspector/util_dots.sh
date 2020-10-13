@@ -1,13 +1,12 @@
 # !/bin/sh
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
-# Copyright 2018, Oracle Corporation and/or its affiliates. All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
-
-# 
+#
 # Description:
 # ------------
 #
-# This helper utility prints dots using a background process 
+# This helper utility prints dots using a background process
 # while a foreground process runs.  Use it to provide feedback
 # while you wait for the foreground process to finish.
 #

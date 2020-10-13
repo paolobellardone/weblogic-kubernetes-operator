@@ -1,6 +1,5 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.work;
 
@@ -17,14 +16,8 @@ public final class NextAction {
   Kind kind;
   Step next;
   Packet packet;
-  Consumer<Fiber> onExit;
+  Consumer<AsyncFiber> onExit;
   Throwable throwable;
-
-  public enum Kind {
-    INVOKE,
-    SUSPEND,
-    THROW
-  }
 
   private void set(Kind k, Step v, Packet p) {
     this.kind = k;
@@ -43,7 +36,7 @@ public final class NextAction {
   }
 
   /**
-   * Indicates that the next action should be to terminate the fiber
+   * Indicates that the next action should be to terminate the fiber.
    *
    * @param t Throwable
    * @param p Packet
@@ -64,7 +57,7 @@ public final class NextAction {
    *
    * @param onExit Called once the fiber is suspended
    */
-  public void suspend(Consumer<Fiber> onExit) {
+  public void suspend(Consumer<AsyncFiber> onExit) {
     suspend(null, onExit);
   }
 
@@ -79,7 +72,7 @@ public final class NextAction {
    * @param next Next step
    * @param onExit Will be invoked after the fiber suspends
    */
-  public void suspend(Step next, Consumer<Fiber> onExit) {
+  public void suspend(Step next, Consumer<AsyncFiber> onExit) {
     set(Kind.SUSPEND, next, null);
     this.onExit = onExit;
   }
@@ -97,23 +90,11 @@ public final class NextAction {
    * @param unit Delay time unit
    */
   public void delay(Step next, Packet p, long delay, TimeUnit unit) {
-    suspend(
-        next,
-        (fiber) -> {
-          fiber
-              .owner
-              .getExecutor()
-              .schedule(
-                  () -> {
-                    fiber.resume(p);
-                  },
-                  delay,
-                  unit);
-        });
+    suspend(next, (fiber) -> fiber.scheduleOnce(delay, unit, () -> fiber.resume(p)));
   }
 
   /**
-   * Returns the next step
+   * Returns the next step.
    *
    * @return Next step
    */
@@ -122,7 +103,7 @@ public final class NextAction {
   }
 
   /**
-   * Sets the next step
+   * Sets the next step.
    *
    * @param next Next step
    */
@@ -131,7 +112,7 @@ public final class NextAction {
   }
 
   /**
-   * Returns the last Packet
+   * Returns the last Packet.
    *
    * @return Packet
    */
@@ -148,5 +129,11 @@ public final class NextAction {
     buf.append("next=").append(next).append(',');
     buf.append("packet=").append(packet != null ? packet.toString() : null).append(']');
     return buf.toString();
+  }
+
+  public enum Kind {
+    INVOKE,
+    SUSPEND,
+    THROW
   }
 }

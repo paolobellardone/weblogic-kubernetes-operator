@@ -1,5 +1,5 @@
-# Copyright 2018 Oracle Corporation and/or its affiliates.  All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 {{- define "operator.operatorRoleBindingNamespace" }}
 ---
@@ -9,7 +9,6 @@ metadata:
   name: "weblogic-operator-rolebinding-namespace"
   namespace: {{ .domainNamespace | quote }}
   labels:
-    weblogic.resourceVersion: "operator-v2"
     weblogic.operatorName: {{ .Release.Namespace | quote }}
 subjects:
 - kind: "ServiceAccount"
@@ -17,7 +16,12 @@ subjects:
   namespace: {{ .Release.Namespace | quote }}
   apiGroup: ""
 roleRef:
+  {{- if .dedicated }}
+  kind: "Role"
+  name: "weblogic-operator-role-namespace"
+  {{- else }}
   kind: "ClusterRole"
   name: {{ list .Release.Namespace "weblogic-operator-clusterrole-namespace" | join "-" | quote }}
+  {{- end }}
   apiGroup: "rbac.authorization.k8s.io"
 {{- end }}

@@ -1,23 +1,22 @@
-// Copyright 2017, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.rest;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import javax.annotation.Priority;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerRequestFilter;
 import javax.ws.rs.ext.Provider;
+
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
 import org.glassfish.jersey.message.MessageUtils;
 
-/** RequestDebugLoggingFilter debug logs all the REST Requests */
+/** RequestDebugLoggingFilter debug logs all the REST Requests. */
 @Provider
 @Priority(FilterPriorities.REQUEST_DEBUG_LOGGING_FILTER_PRIORITY)
 public class RequestDebugLoggingFilter extends BaseDebugLoggingFilter
@@ -25,14 +24,13 @@ public class RequestDebugLoggingFilter extends BaseDebugLoggingFilter
 
   private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
 
-  /** Construct a RequestDebugLoggingFilter */
+  /** Construct a RequestDebugLoggingFilter. */
   public RequestDebugLoggingFilter() {
     // nothing to do
   }
 
-  /** {@inheritDoc} */
   @Override
-  public void filter(ContainerRequestContext req) throws IOException {
+  public void filter(ContainerRequestContext req) {
     LOGGER.entering();
     if (!LOGGER.isFineEnabled()) {
       return; // don't waste time doing all the calculations
@@ -73,24 +71,25 @@ public class RequestDebugLoggingFilter extends BaseDebugLoggingFilter
     LOGGER.entering();
     // Read the entire input stream into a String
     // This should be OK since JSON input shouldn't be monstrously big
-    BufferedReader ir = new BufferedReader(new InputStreamReader(req.getEntityStream()));
-    StringBuilder sb = new StringBuilder();
-    String line = null;
-    Charset cs = MessageUtils.getCharset(req.getMediaType());
-    // TBD - is all the Charset handling correct?
-    do {
-      line = ir.readLine();
-      if (line != null) {
-        sb.append(line);
-      }
-    } while (line != null);
-    ir.close();
-    String entity = sb.toString();
+    try (BufferedReader ir = new BufferedReader(new InputStreamReader(req.getEntityStream()))) {
+      StringBuilder sb = new StringBuilder();
+      String line = null;
+      Charset cs = MessageUtils.getCharset(req.getMediaType());
+      // TBD - is all the Charset handling correct?
+      do {
+        line = ir.readLine();
+        if (line != null) {
+          sb.append(line);
+        }
+      } while (line != null);
+      ir.close();
+      String entity = sb.toString();
 
-    // Set the request input stream to a clone of the original input stream
-    // so that it can be read again
-    req.setEntityStream(new ByteArrayInputStream(entity.getBytes(cs)));
-    LOGGER.exiting(entity);
-    return entity;
+      // Set the request input stream to a clone of the original input stream
+      // so that it can be read again
+      req.setEntityStream(new ByteArrayInputStream(entity.getBytes(cs)));
+      LOGGER.exiting(entity);
+      return entity;
+    }
   }
 }

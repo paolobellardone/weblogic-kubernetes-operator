@@ -1,37 +1,39 @@
-// Copyright 2017, 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.steps;
 
-import static oracle.kubernetes.operator.LabelConstants.CREATEDBYOPERATOR_LABEL;
-import static oracle.kubernetes.operator.LabelConstants.forDomainUid;
+import java.util.stream.Collectors;
 
-import io.kubernetes.client.models.V1PersistentVolumeClaimList;
-import io.kubernetes.client.models.V1PersistentVolumeList;
-import io.kubernetes.client.models.V1ServiceList;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Map;
+import io.kubernetes.client.openapi.models.V1ServiceList;
 import oracle.kubernetes.operator.calls.CallResponse;
 import oracle.kubernetes.operator.helpers.CallBuilder;
 import oracle.kubernetes.operator.helpers.ConfigMapHelper;
 import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
-import oracle.kubernetes.operator.helpers.ServerKubernetesObjects;
+import oracle.kubernetes.operator.helpers.PodHelper;
 import oracle.kubernetes.operator.work.NextAction;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
 
+import static oracle.kubernetes.operator.LabelConstants.forDomainUidSelector;
+import static oracle.kubernetes.operator.LabelConstants.getCreatedbyOperatorSelector;
+
 public class DeleteDomainStep extends Step {
   private final DomainPresenceInfo info;
   private final String namespace;
-  private final String domainUID;
+  private final String domainUid;
 
-  public DeleteDomainStep(DomainPresenceInfo info, String namespace, String domainUID) {
+  /**
+   * Construct delete domain step.
+   * @param info domain presence
+   * @param namespace namespace
+   * @param domainUid domain UID
+   */
+  public DeleteDomainStep(DomainPresenceInfo info, String namespace, String domainUid) {
     super(null);
     this.info = info;
     this.namespace = namespace;
-    this.domainUID = domainUID;
+    this.domainUid = domainUid;
   }
 
   @Override
@@ -40,13 +42,12 @@ public class DeleteDomainStep extends Step {
         Step.chain(
             deletePods(),
             deleteServices(),
-            deletePersistentVolumes(),
-            deletePersistentVolumeClaims(),
-            ConfigMapHelper.deleteDomainIntrospectorConfigMapStep(domainUID, namespace, getNext()));
+            ConfigMapHelper.deleteIntrospectorConfigMapStep(domainUid, namespace, getNext()));
     if (info != null) {
-      Collection<Map.Entry<String, ServerKubernetesObjects>> serversToStop = new ArrayList<>();
-      serversToStop.addAll(info.getServers().entrySet());
-      serverDownStep = new ServerDownIteratorStep(serversToStop, serverDownStep);
+      serverDownStep =
+          new ServerDownIteratorStep(
+              info.getServerPods().map(PodHelper::getPodServerName).collect(Collectors.toList()),
+              serverDownStep);
     }
 
     return doNext(serverDownStep, packet);
@@ -54,7 +55,7 @@ public class DeleteDomainStep extends Step {
 
   private Step deleteServices() {
     return new CallBuilder()
-        .withLabelSelectors(forDomainUid(domainUID), CREATEDBYOPERATOR_LABEL)
+        .withLabelSelectors(forDomainUidSelector(domainUid), getCreatedbyOperatorSelector())
         .listServiceAsync(
             namespace,
             new ActionResponseStep<V1ServiceList>() {
@@ -66,33 +67,8 @@ public class DeleteDomainStep extends Step {
 
   private Step deletePods() {
     return new CallBuilder()
-        .withLabelSelectors(forDomainUid(domainUID), CREATEDBYOPERATOR_LABEL)
+        .withLabelSelectors(forDomainUidSelector(domainUid), getCreatedbyOperatorSelector())
         .deleteCollectionPodAsync(namespace, new DefaultResponseStep<>(null));
-  }
-
-  private Step deletePersistentVolumes() {
-    return new CallBuilder()
-        .withLabelSelectors(forDomainUid(domainUID), CREATEDBYOPERATOR_LABEL)
-        .listPersistentVolumeAsync(
-            new ActionResponseStep<V1PersistentVolumeList>() {
-              @Override
-              Step createSuccessStep(V1PersistentVolumeList result, Step next) {
-                return new DeletePersistentVolumeListStep(result.getItems(), next);
-              }
-            });
-  }
-
-  private Step deletePersistentVolumeClaims() {
-    return new CallBuilder()
-        .withLabelSelectors(forDomainUid(domainUID), CREATEDBYOPERATOR_LABEL)
-        .listPersistentVolumeClaimAsync(
-            namespace,
-            new ActionResponseStep<V1PersistentVolumeClaimList>() {
-              @Override
-              Step createSuccessStep(V1PersistentVolumeClaimList result, Step next) {
-                return new DeletePersistentVolumeClaimListStep(result.getItems(), next);
-              }
-            });
   }
 
   /**
@@ -100,7 +76,8 @@ public class DeleteDomainStep extends Step {
    * a non-null response, runs a specified new step before continuing the step chain.
    */
   abstract static class ActionResponseStep<T> extends DefaultResponseStep<T> {
-    ActionResponseStep() {}
+    ActionResponseStep() {
+    }
 
     abstract Step createSuccessStep(T result, Step next);
 

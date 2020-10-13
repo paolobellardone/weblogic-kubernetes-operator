@@ -1,14 +1,12 @@
-// Copyright 2018, Oracle Corporation and/or its affiliates.  All rights reserved.
-// Licensed under the Universal Permissive License v 1.0 as shown at
-// http://oss.oracle.com/licenses/upl.
+// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.wlsconfig;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang3.builder.ToStringBuilder;
 
-/** Contains configuration of a WLS server that belongs to a dynamic cluster */
+/** Contains configuration of a WLS server that belongs to a dynamic cluster. */
 public class WlsDynamicServerConfig extends WlsServerConfig {
 
   // default listen ports per WebLogic DynamicServersMBean
@@ -17,7 +15,37 @@ public class WlsDynamicServerConfig extends WlsServerConfig {
   static final int DEFAULT_NAP_LISTEN_PORT_RANGE_BASE = 9100;
 
   /**
-   * Create a dynamic server config using server template and index number of this server
+   * private constructor. Use {@link #create(String, int, String, String, boolean, WlsServerConfig)}
+   * for creating an instance of WlsDynamicServerConfig instead.
+   *
+   * @param name Name of the dynamic server
+   * @param listenPort list port of the dynamic server
+   * @param listenAddress listen address of the dynamic server
+   * @param sslListenPort SSL listen port of the dynamic server
+   * @param machineName machine name of the dynamic server
+   * @param adminPort administration port if administration port is enabled
+   * @param networkAccessPoints network access points or channels configured for this dynamic server
+   */
+  private WlsDynamicServerConfig(
+      String name,
+      Integer listenPort,
+      String listenAddress,
+      Integer sslListenPort,
+      String machineName,
+      Integer adminPort,
+      List<NetworkAccessPoint> networkAccessPoints) {
+    super(
+        name,
+        listenAddress,
+        machineName,
+        listenPort,
+        sslListenPort,
+        adminPort,
+        networkAccessPoints);
+  }
+
+  /**
+   * Create a dynamic server config using server template and index number of this server.
    *
    * @param name Name of the server
    * @param index index of this server within the cluster, for example, the index of dserver-2 would
@@ -72,55 +100,18 @@ public class WlsDynamicServerConfig extends WlsServerConfig {
         listenPort,
         macroSubstitutor.substituteMacro(serverTemplate.getListenAddress()),
         sslListenPort,
-        serverTemplate.isSslPortEnabled(),
         macroSubstitutor.substituteMacro(serverTemplate.getMachineName()),
+        serverTemplate.getAdminPort(),
         networkAccessPoints);
   }
 
   /**
-   * private constructor. Use {@link #create(String, int, String, String, boolean, WlsServerConfig)}
-   * for creating an instance of WlsDynamicServerConfig instead.
-   *
-   * @param name Name of the dynamic server
-   * @param listenPort list port of the dynamic server
-   * @param listenAddress listen address of the dynamic server
-   * @param sslListenPort SSL listen port of the dynamic server
-   * @param sslPortEnabled boolean indicating whether SSL listen port is enabled
-   * @param machineName machine name of the dynamic server
-   * @param networkAccessPoints network access points or channels configured for this dynamic server
-   */
-  private WlsDynamicServerConfig(
-      String name,
-      Integer listenPort,
-      String listenAddress,
-      Integer sslListenPort,
-      boolean sslPortEnabled,
-      String machineName,
-      List<NetworkAccessPoint> networkAccessPoints) {
-    super(
-        name,
-        listenPort,
-        listenAddress,
-        sslListenPort,
-        sslPortEnabled,
-        machineName,
-        networkAccessPoints,
-        null,
-        false);
-  }
-
-  /**
-   * Whether this server is a dynamic server, ie, not statically configured
+   * Whether this server is a dynamic server, ie, not statically configured.
    *
    * @return True if this server is a dynamic server, false if this server is configured statically
    */
   @Override
   public boolean isDynamicServer() {
     return true;
-  }
-
-  @Override
-  public String toString() {
-    return new ToStringBuilder(this).toString();
   }
 }
